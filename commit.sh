@@ -1,160 +1,127 @@
 #!/usr/bin/env bash
 set -e
 
-# Extend README with routing/algorithm abstractions
+# Update README
 cat >> README.md << 'EOF'
 
 ---
 
-Routing abstractions introduced:
+Graph Implementation:
 
-- `routing.Router`: per-node routing behaviour and DV handling.
-- `routing.RouteEntry`, `routing.DVMessage`: basic routing data types.
-- `algorithms.DijkstraEngine`, `algorithms.DistanceVectorEngine`: graph algorithm interfaces used by routers.
+- Added `AdjacencyListGraph` in `adjacency_list_graph.py`
+- Directed adjacency-list graph implementing the `Graph` interface
+- Included pytest tests under `tests/`
 EOF
 
-# routing interfaces
-cat > routing.py << 'EOF'
+# Concrete directed graph implementation
+cat > adjacency_list_graph.py << 'EOF'
 """
-Routing abstractions for satsim.
+Concrete directed, weighted graph implementation for satsim.
 
-Defines Router interface shared by both high-compute and low-compute nodes,
-plus simple data structures for routes and DV messages.
+Implements the Graph interface using a simple adjacency-list representation.
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Iterable, Mapping
 
 from nodes import Node
 from graph import Graph
 
 
-@dataclass
-class RouteEntry:
+class AdjacencyListGraph(Graph):
     """
-    Single forwarding entry in a node's routing table.
+    Directed, weighted graph backed by a node -> (neighbor -> weight) mapping.
     """
-    dest: Node
-    next_hop: Node
-    cost: float
-    origin_hc: Optional[Node]  # high-compute anchor, if any
-    epoch: int                 # HC epoch for this entry (0 if none)
+
+    def __init__(self) -> None:
+        self._adj: Dict[Node, Dict[Node, float]] = {}
+
+    # --- Mutation API (test/sim only, not part of Graph interface) -----------
+
+    def add_node(self, node: Node) -> None:
+        """Ensure node exists in the graph."""
+        self._adj.setdefault(node, {})
+
+    def add_edge(self, src: Node, dst: Node, weight: float) -> None:
+        """
+        Add or update a directed edge src -> dst with weight.
+        Auto-adds nodes if they don't exist.
+        """
+        self.add_node(src)
+        self.add_node(dst)
+        self._adj[src][dst] = weight
+
+    # --- Graph interface -----------------------------------------------------
+
+    def nodes(self) -> Iterable[Node]:
+        return self._adj.keys()
+
+    def outgoing(self, node: Node) -> Mapping[Node, float]:
+        return dict(self._adj.get(node, {}))  # defensive copy
+EOF
+
+# Tests package setup
+mkdir -p tests
+
+cat > tests/__init__.py << 'EOF'
+# test package
+EOF
+
+cat > tests/test_adjacency_list_graph.py << 'EOF'
+"""
+Unit tests for AdjacencyListGraph.
+"""
+
+from dataclasses import dataclass
+
+from adjacency_list_graph import AdjacencyListGraph
+from nodes import Node
 
 
 @dataclass(frozen=True)
-class DVMessage:
+class TestNode(Node):
     """
-    Distance-vector advertisement sent between neighbours.
-
-    For HC-originated routes, origin_hc and epoch identify the Dijkstra epoch
-    that produced the advertised cost. For LC-only routes, origin_hc may be None.
+    Minimal concrete Node implementation for testing.
     """
-    dest: Node
-    cost: float
-    origin_hc: Optional[Node]
-    epoch: int
 
-
-class Router(ABC):
-    """
-    Common router API implemented by all nodes (HC and LC).
-
-    High-compute routers may combine link-state + Dijkstra + DV export.
-    Low-compute routers typically consume DV only and run local BF relaxations.
-    """
+    _id: str
 
     @property
-    @abstractmethod
-    def node(self) -> Node:
-        """Node identity owned by this router."""
-        raise NotImplementedError
+    def id(self) -> str:
+        return self._id
 
-    @abstractmethod
-    def recompute_on_topology(self, g: Graph, epoch: int) -> None:
-        """
-        Called when a new topology snapshot (and epoch) is available.
 
-        High-compute routers may run Dijkstra here and prepare DV adverts.
-        Low-compute routers may only refresh local neighbour costs.
-        """
-        raise NotImplementedError
+def test_add_nodes_and_edges():
+    g = AdjacencyListGraph()
 
-    @abstractmethod
-    def next_hop(self, dest: Node) -> Optional[Node]:
-        """
-        Return the next hop toward dest under the current routing state.
+    a = TestNode("A")
+    b = TestNode("B")
+    c = TestNode("C")
 
-        Returns None if dest is currently unreachable.
-        """
-        raise NotImplementedError
+    g.add_edge(a, b, 1.0)
+    g.add_edge(a, c, 2.0)
+    g.add_edge(b, c, 3.0)
 
-    @abstractmethod
-    def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
-        """
-        Process one incoming distance-vector message from neighbour src.
-        """
-        raise NotImplementedError
+    assert set(g.nodes()) == {a, b, c}
+
+    assert g.outgoing(a) == {b: 1.0, c: 2.0}
+    assert g.outgoing(b) == {c: 3.0}
+    assert g.outgoing(c) == {}
+
+
+def test_outgoing_returns_copy():
+    g = AdjacencyListGraph()
+    a = TestNode("A")
+    b = TestNode("B")
+
+    g.add_edge(a, b, 1.0)
+
+    out = g.outgoing(a)
+    out.clear()
+
+    # internal structure must remain intact
+    assert g.outgoing(a) == {b: 1.0}
 EOF
 
-# algorithm interfaces
-cat > algorithms.py << 'EOF'
-"""
-Algorithm interfaces for routing.
+echo "Created adjacency_list_graph.py and pytest tests. Run: pytest"
 
-Keeps graph algorithms separate from router wiring and simulation details.
-"""
-
-from abc import ABC, abstractmethod
-from typing import Dict, Mapping
-
-from nodes import Node
-from graph import Graph
-
-
-class DijkstraEngine(ABC):
-    """
-    Interface for single-source shortest-path computation.
-    """
-
-    @abstractmethod
-    def shortest_paths(self, graph: Graph, source: Node) -> Dict[Node, float]:
-        """
-        Compute shortest-path costs from source to all reachable nodes.
-
-        Returns:
-            Mapping dest_node -> path_cost(source -> dest_node).
-        """
-        raise NotImplementedError
-
-
-class DistanceVectorEngine(ABC):
-    """
-    Interface for a Bellman–Ford-style distance-vector relaxation step.
-    """
-
-    @abstractmethod
-    def relax(
-        self,
-        self_node: Node,
-        neighbor_costs: Mapping[Node, float],
-        current_costs: Mapping[Node, float],
-        adverts: Mapping[Node, Mapping[Node, float]],
-    ) -> Dict[Node, float]:
-        """
-        Perform one relaxation step for self_node.
-
-        Args:
-            self_node: node whose distances are updated.
-            neighbor_costs: cost(self_node -> v) for each neighbour v.
-            current_costs: current local estimate dest -> cost.
-            adverts: for each neighbour v: advertised dest -> cost_v(dest).
-
-        Returns:
-            New dest -> cost map after one Bellman–Ford relaxation step.
-        """
-        raise NotImplementedError
-EOF
-
-echo "Commit 2 interfaces created: routing.py, algorithms.py, README updated."
 
