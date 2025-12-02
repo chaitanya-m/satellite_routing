@@ -9,7 +9,7 @@ from nodes import Node
 
 
 @dataclass(frozen=True)
-class TestNode(Node):
+class DummyNode(Node):
     """
     Minimal concrete Node implementation for testing.
     """
@@ -24,9 +24,9 @@ class TestNode(Node):
 def test_add_nodes_and_edges():
     g = AdjacencyListGraph()
 
-    a = TestNode("A")
-    b = TestNode("B")
-    c = TestNode("C")
+    a = DummyNode("A")
+    b = DummyNode("B")
+    c = DummyNode("C")
 
     g.add_edge(a, b, 1.0)
     g.add_edge(a, c, 2.0)
@@ -41,8 +41,8 @@ def test_add_nodes_and_edges():
 
 def test_outgoing_returns_copy():
     g = AdjacencyListGraph()
-    a = TestNode("A")
-    b = TestNode("B")
+    a = DummyNode("A")
+    b = DummyNode("B")
 
     g.add_edge(a, b, 1.0)
 
