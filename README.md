@@ -22,3 +22,12 @@ Graph Implementation:
 - Added `AdjacencyListGraph` in `adjacency_list_graph.py`
 - Directed adjacency-list graph implementing the `Graph` interface
 - Included pytest tests under `tests/`
+
+---
+
+Shortest-path computation:
+
+- Added `SimpleDijkstraEngine` in `dijkstra_engine.py`
+- Uses a binary heap (`heapq`) to implement Dijkstra's algorithm over the
+  `Graph` interface (directed, weighted).
+- Returns a mapping from node -> shortest-path cost from the source node.
