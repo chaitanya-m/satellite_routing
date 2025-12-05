@@ -46,10 +46,7 @@ class Config:
 
 
 def load_config(path: Path) -> Config:
-    try:
-        import yaml  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("PyYAML is required to load experiment configs") from exc
+    import yaml  # type: ignore
 
     data = yaml.safe_load(path.read_text())
     experiments = [
@@ -82,6 +79,35 @@ def run_experiments(config_path: Path) -> List[Dict[str, object]]:
                 summary = _run_single(exp, policy, seed)
                 results.append(summary)
     return results
+
+
+def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[str, float]]:
+    """
+    Aggregate metrics across runs by policy for quick comparisons.
+    """
+    accum: Dict[str, Dict[str, float]] = {}
+    counts: Dict[str, int] = {}
+    for res in results:
+        policy = str(res["policy"])
+        metrics = res.get("metrics", {})
+        counts[policy] = counts.get(policy, 0) + 1
+        bucket = accum.setdefault(policy, {"avg_reachable_sum": 0.0, "routers_sum": 0.0})
+        bucket["avg_reachable_sum"] += float(metrics.get("avg_reachable", 0.0))
+        bucket["routers_sum"] += float(metrics.get("routers", 0.0))
+
+    aggregated: Dict[str, Dict[str, float]] = {}
+    for policy, sums in accum.items():
+        n = counts[policy]
+        aggregated[policy] = {
+            "avg_reachable": sums["avg_reachable_sum"] / n if n else 0.0,
+            "avg_routers": sums["routers_sum"] / n if n else 0.0,
+            "runs": float(n),
+        }
+    return aggregated
+
+
+def _parse_simple_yaml(text: str) -> Dict[str, object]:
+    return yaml.safe_load(text)
 
 
 def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) -> Dict[str, object]:
@@ -170,6 +196,7 @@ def main() -> None:
     results = run_experiments(config_path)
     for res in results:
         print(res)
+    print("Aggregated by policy:", aggregate_by_policy(results))
 
 
 if __name__ == "__main__":
