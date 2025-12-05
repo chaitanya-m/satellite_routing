@@ -1,0 +1,24 @@
+seed: 0            # base RNG seed for reproducibility
+seed_count: 10     # number of seeds per experiment (seed, seed+1, ...)
+
+experiments:
+  - name: sats_50
+    satellites: 50
+    ground_stations: 8
+    sat_degree: 4
+    ground_links: 4
+  - name: sats_100
+    satellites: 100
+    ground_stations: 12
+    sat_degree: 4
+    ground_links: 4
+  - name: sats_500
+    satellites: 500
+    ground_stations: 20
+    sat_degree: 6
+    ground_links: 6
+  - name: sats_1000
+    satellites: 1000
+    ground_stations: 30
+    sat_degree: 6
+    ground_links: 6
