@@ -21,10 +21,12 @@ class RouteSelectionPolicy(Enum):
 
     DV_ONLY: prefer the cheapest DV cost (no HC/epoch bias).
     PREFER_HC_EPOCH: prefer high-compute origins with fresher epochs, then cost.
+    DIJKSTRA_ONLY: bypass DV entirely and rely on local Dijkstra at all nodes.
     """
 
     DV_ONLY = "dv_only"
     PREFER_HC_EPOCH = "prefer_hc_epoch"
+    DIJKSTRA_ONLY = "dijkstra_only"
 
 
 # Global policy used by all routers; adjustable for experiments/comparisons.
