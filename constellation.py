@@ -79,15 +79,15 @@ class GroundStationNode(Node):
         return self._id
 
 
-def _poisson(rng: random.Random, lam: float) -> int:
+def _poisson(rng: random.Random, lambda_: float) -> int:
     """
-    Sample a Poisson-distributed count with rate lam using Knuth's method.
-    Suitable for modest lam (tens to hundreds) used in these generators.
+    Sample a Poisson-distributed count with rate lambda using Knuth's method.
+    Suitable for modest lambda (tens to hundreds) used in these generators.
     """
-    if lam <= 0:
+    if lambda_ <= 0:
         return 0
 
-    threshold = exp(-lam)
+    threshold = exp(-lambda_)
     prod = 1.0
     k = 0
 
@@ -121,12 +121,12 @@ def generate_poisson_constellation(
 
     How it works:
     - Take the global expected_count and split it across the provided bands
-      proportional to each band's weight; this produces a per-band rate λ that
-      reflects how popular that latitude shell is.
+      proportional to each band's weight; this produces a per-band rate λ
+      (lambda) that reflects how popular that latitude shell is.
     - For each band, sample an actual population from a Poisson distribution
-      with rate λ (Knuth sampler). Poisson variation keeps total counts reasonable
-      without hard-coding a fixed number per band, which better mimics
-      deployment noise and avoids perfect symmetry.
+      with rate λ (Knuth sampler). Poisson variation keeps total counts
+      reasonable without hard-coding a fixed number per band, which better
+      mimics deployment noise and avoids perfect symmetry.
     - For every sampled satellite, draw (lat, lon) uniformly by area within
       the band's latitude bounds (sin-lat transform) and assign a constant
       altitude_km. Nodes are sequentially numbered SAT-0, SAT-1, ...
@@ -151,8 +151,8 @@ def generate_poisson_constellation(
     satellites: List[SatelliteNode] = []
 
     for idx, band in enumerate(bands):
-        lam = expected_count * (band.weight / total_weight)
-        count = _poisson(rng, lam)
+        lambda_band = expected_count * (band.weight / total_weight)
+        count = _poisson(rng, lambda_band)
         for _ in range(count):
             lat, lon = _sample_lat_lon(rng, band.min_lat, band.max_lat)
             sat_id = f"SAT-{len(satellites)}"
@@ -176,8 +176,8 @@ def generate_ground_stations(
     stations: List[GroundStationNode] = []
 
     for band in bands:
-        lam = expected_count * (band.weight / total_weight)
-        count = _poisson(rng, lam)
+        lambda_band = expected_count * (band.weight / total_weight)
+        count = _poisson(rng, lambda_band)
         for _ in range(count):
             lat, lon = _sample_lat_lon(rng, band.min_lat, band.max_lat)
             gs_id = f"GS-{len(stations)}"
