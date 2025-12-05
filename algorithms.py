@@ -17,12 +17,24 @@ class DijkstraEngine(ABC):
     """
 
     @abstractmethod
-    def shortest_paths(self, graph: Graph, source: Node) -> Dict[Node, float]:
+    def shortest_path_costs(self, graph: Graph, source: Node) -> Dict[Node, float]:
         """
         Compute shortest-path costs from source to all reachable nodes.
 
         Returns:
             Mapping dest_node -> path_cost(source -> dest_node).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def shortest_paths(
+        self, graph: Graph, source: Node
+    ) -> tuple[Dict[Node, float], Dict[Node, Node]]:
+        """
+        Compute shortest-path costs plus the predecessor chain for each dest.
+
+        Returns:
+            (dist, prev) where dist is the cost map and prev records parents.
         """
         raise NotImplementedError
 

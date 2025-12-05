@@ -22,6 +22,7 @@ class DummyNode(Node):
 
 
 def test_dijkstra_basic_paths():
+    """Basic 3-node graph: verify shortest costs via heap-based Dijkstra."""
     g = AdjacencyListGraph()
     a = DummyNode("A")
     b = DummyNode("B")
@@ -33,7 +34,7 @@ def test_dijkstra_basic_paths():
     g.add_edge(b, c, 2.0)
 
     engine = SimpleDijkstraEngine()
-    dist = engine.shortest_paths(g, a)
+    dist = engine.shortest_path_costs(g, a)
 
     assert dist[a] == 0.0
     assert dist[b] == 1.0
@@ -42,6 +43,7 @@ def test_dijkstra_basic_paths():
 
 
 def test_dijkstra_unreachable_node_absent():
+    """Unreachable nodes should be absent from the distance map."""
     g = AdjacencyListGraph()
     a = DummyNode("A")
     b = DummyNode("B")
@@ -51,9 +53,27 @@ def test_dijkstra_unreachable_node_absent():
     g.add_node(c)
 
     engine = SimpleDijkstraEngine()
-    dist = engine.shortest_paths(g, a)
+    dist = engine.shortest_path_costs(g, a)
 
     assert dist[a] == 0.0
     assert dist[b] == 2.0
     # Unreachable node should not appear in the distance map
     assert c not in dist
+
+
+def test_dijkstra_returns_path():
+    """Parent map should capture predecessors for path reconstruction."""
+    g = AdjacencyListGraph()
+    a = DummyNode("A")
+    b = DummyNode("B")
+    c = DummyNode("C")
+
+    g.add_edge(a, b, 1.0)
+    g.add_edge(b, c, 2.0)
+
+    engine = SimpleDijkstraEngine()
+    dist, parents = engine.shortest_paths(g, a)
+
+    assert dist[c] == 3.0
+    assert parents[c] == b
+    assert parents[b] == a
