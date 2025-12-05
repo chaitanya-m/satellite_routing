@@ -1,5 +1,5 @@
 """
-Simulation helpers for DV message exchange.
+Simulation utilities for DV message exchange.
 """
 
 from typing import Dict, List
