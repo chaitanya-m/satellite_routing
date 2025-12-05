@@ -7,7 +7,7 @@ plus simple data structures for routes and DV messages.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Mapping, Optional
 
 from nodes import Node
 from graph import Graph
@@ -69,6 +69,13 @@ class Router(ABC):
         Return the next hop toward dest under the current routing state.
 
         Returns None if dest is currently unreachable.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def outgoing_dv_messages(self) -> Mapping[Node, list[DVMessage]]:
+        """
+        Build DV adverts destined for each neighbour.
         """
         raise NotImplementedError
 
