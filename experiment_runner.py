@@ -7,16 +7,18 @@ per policy, and runs DV rounds (or pure Dijkstra) to produce summary metrics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence
+from typing import Dict, Iterable, List, Mapping, Sequence, Set, Tuple
 import copy
+import csv
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
 
 from algorithms import DijkstraEngine
 from dijkstra_engine import SimpleDijkstraEngine
 from distance_vector_engine import SimpleDistanceVectorEngine
 from nodes import Node
-import time
 from routers import (
     DijkstraRouter,
     GroundStationRouter,
@@ -68,21 +70,70 @@ def load_config(path: Path) -> Config:
     )
 
 
-def run_experiments(config_path: Path) -> List[Dict[str, object]]:
+def run_experiments(
+    config_path: Path,
+    runs_csv: Path | None = None,
+    aggregates_csv: Path | None = None,
+    max_workers: int | None = None,
+    use_processes: bool = True,
+) -> List[Dict[str, object]]:
     cfg = load_config(config_path)
-    results: List[Dict[str, object]] = []
     start = time.time()
 
+    existing_runs = load_runs_csv(runs_csv) if runs_csv else []
+    seen_keys: Set[Tuple[str, str, int]] = {
+        (str(r.get("experiment")), str(r.get("policy")), int(r.get("seed"))) for r in existing_runs
+    }
+
+    tasks: List[tuple[ExperimentConfig, RouteSelectionPolicy, int]] = []
     for exp in cfg.experiments:
         for policy_name in cfg.route_selection_policies:
             policy = RouteSelectionPolicy[policy_name]
             for offset in range(cfg.seed_count):
                 seed = cfg.seed + offset
-                print(f"[run] experiment={exp.name} policy={policy.value} seed={seed}")
-                summary = _run_single(exp, policy, seed)
-                results.append(summary)
+                key = (exp.name, policy.value, seed)
+                if key in seen_keys:
+                    continue
+                tasks.append((exp, policy, seed))
+
+    new_results: List[Dict[str, object]] = []
+    if tasks:
+        if use_processes:
+            try:
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_task = {
+                        executor.submit(_run_task, asdict(exp), policy.value, seed): (exp.name, policy.value, seed)
+                        for exp, policy, seed in tasks
+                    }
+                    for future in as_completed(future_to_task):
+                        exp_name, policy_val, seed = future_to_task[future]
+                        try:
+                            res = future.result()
+                            new_results.append(res)
+                            if runs_csv:
+                                append_run_row(runs_csv, res)
+                            print(f"[run] completed experiment={exp_name} policy={policy_val} seed={seed}")
+                        except Exception as exc:
+                            print(f"[run] failed experiment={exp_name} policy={policy_val} seed={seed}: {exc}")
+            except (PermissionError, NotImplementedError, OSError) as exc:
+                print(f"[run] process pool unavailable ({exc}), falling back to sequential execution")
+                use_processes = False
+
+        if not use_processes:
+            for exp, policy, seed in tasks:
+                res = _run_task(asdict(exp), policy.value, seed)
+                new_results.append(res)
+                if runs_csv:
+                    append_run_row(runs_csv, res)
+                print(f"[run] completed experiment={exp.name} policy={policy.value} seed={seed}")
+
+    results = existing_runs + new_results
+
+    if aggregates_csv:
+        write_aggregates_csv(aggregate_by_policy(results), aggregates_csv)
+
     elapsed = time.time() - start
-    print(f"[run] completed {len(results)} runs in {elapsed:.2f}s")
+    print(f"[run] completed {len(results)} total runs in {elapsed:.2f}s")
     return results
 
 
@@ -111,8 +162,64 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[
     return aggregated
 
 
-def _parse_simple_yaml(text: str) -> Dict[str, object]:
-    return yaml.safe_load(text)
+def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict[str, object]:
+    exp = ExperimentConfig(
+        name=str(exp_dict["name"]),
+        satellites=int(exp_dict["satellites"]),
+        ground_stations=int(exp_dict["ground_stations"]),
+        sat_degree=int(exp_dict["sat_degree"]),
+        ground_links=int(exp_dict["ground_links"]),
+    )
+    policy = RouteSelectionPolicy(policy_value)
+    return _run_single(exp, policy, seed)
+
+
+def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
+    if path is None or not path.exists():
+        return []
+    with path.open() as f:
+        reader = csv.DictReader(f)
+        rows: List[Dict[str, object]] = []
+        for row in reader:
+            row["seed"] = int(row.get("seed", 0))
+            rows.append(row)
+        return rows
+
+
+def append_run_row(path: Path, res: Dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not path.exists()
+    with path.open("a", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "experiment",
+                "policy",
+                "seed",
+                "satellites",
+                "ground_stations",
+                "routers",
+                "avg_reachable",
+                "min_reachable",
+                "max_reachable",
+            ],
+        )
+        if write_header:
+            writer.writeheader()
+        metrics = res.get("metrics", {})
+        writer.writerow(
+            {
+                "experiment": res.get("experiment"),
+                "policy": res.get("policy"),
+                "seed": res.get("seed"),
+                "satellites": res.get("satellites"),
+                "ground_stations": res.get("ground_stations"),
+                "routers": metrics.get("routers"),
+                "avg_reachable": metrics.get("avg_reachable"),
+                "min_reachable": metrics.get("min_reachable"),
+                "max_reachable": metrics.get("max_reachable"),
+            }
+        )
 
 
 def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) -> Dict[str, object]:
@@ -200,8 +307,6 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
     """
     Write per-run results to CSV for downstream analysis.
     """
-    import csv
-
     fieldnames = [
         "experiment",
         "policy",
@@ -237,8 +342,6 @@ def write_aggregates_csv(aggregated: Mapping[str, Mapping[str, float]], path: Pa
     """
     Write aggregated metrics by policy to CSV.
     """
-    import csv
-
     fieldnames = ["policy", "runs", "avg_reachable", "avg_routers"]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -257,15 +360,15 @@ def write_aggregates_csv(aggregated: Mapping[str, Mapping[str, float]], path: Pa
 
 def main() -> None:
     config_path = Path(__file__).parent / "experiments" / "experiments.yml"
-    results = run_experiments(config_path)
+    out_dir = Path(__file__).parent / "experiments" / "results"
+    runs_csv = out_dir / "runs.csv"
+    aggregates_csv = out_dir / "aggregates.csv"
+
+    results = run_experiments(config_path, runs_csv=runs_csv, aggregates_csv=aggregates_csv)
     for res in results:
         print(res)
     print("Aggregated by policy:", aggregate_by_policy(results))
-
-    out_dir = Path(__file__).parent / "experiments" / "results"
-    write_results_csv(results, out_dir / "runs.csv")
-    write_aggregates_csv(aggregate_by_policy(results), out_dir / "aggregates.csv")
-    print(f"Wrote runs to {out_dir / 'runs.csv'} and aggregates to {out_dir / 'aggregates.csv'}")
+    print(f"Wrote runs to {runs_csv} and aggregates to {aggregates_csv}")
 
 
 if __name__ == "__main__":
