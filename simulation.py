@@ -2,18 +2,18 @@
 Simulation utilities for DV message exchange.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Mapping, Optional
 
 from graph import Graph
 from nodes import Node
-from routing import DVMessage, Router
+from routing import Router
 
 
 def run_dv_round(graph: Graph, routers: Dict[Node, Router]) -> None:
     """
     Perform one synchronous DV round across all routers using the graph topology.
     """
-    deliveries: List[tuple[Node, Node, List[DVMessage]]] = []
+    deliveries: List[tuple[Node, Node, Mapping[Node, tuple[float, Optional[Node], int]]]] = []
     for router in routers.values():
         adverts = router.outgoing_dv_messages()
         for neighbor, msgs in adverts.items():
@@ -27,8 +27,9 @@ def run_dv_round(graph: Graph, routers: Dict[Node, Router]) -> None:
         dst_router = routers.get(dst)
         if not dst_router:
             continue
-        for msg in msgs:
-            dst_router.handle_dv_message(src, msg)
+        for dest, payload in msgs.items():
+            cost, origin_hc, epoch = payload
+            dst_router.handle_dv_message(src, dest, cost, origin_hc, epoch)
 
     # Apply DV relaxations once per router after all messages for the round arrive.
     for router in routers.values():

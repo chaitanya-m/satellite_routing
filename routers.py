@@ -5,14 +5,14 @@ Ground stations run Dijkstra as an oracle and export DV adverts.
 Satellites run DV only and learn from ground-station adverts.
 """
 
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 from enum import Enum
 import math
 
 from algorithms import DijkstraEngine, DistanceVectorEngine
 from graph import Graph
 from nodes import Node
-from routing import DVMessage, RouteEntry, Router
+from routing import RouteEntry, Router
 
 
 class RouteSelectionPolicy(Enum):
@@ -48,7 +48,8 @@ class BaseDVRouter(Router):
         self._node = node
         self._dv_engine = dv_engine
         self._neighbor_costs: Dict[Node, float] = {}
-        self._adverts: Dict[Node, Dict[Node, DVMessage]] = {}
+        # Stored as neighbour -> (dest -> (cost, origin_hc, epoch))
+        self._adverts: Dict[Node, Dict[Node, Tuple[float, Optional[Node], int]]] = {}
         self._routing_table: Dict[Node, RouteEntry] = {
             node: RouteEntry(node, node, 0.0, node, 0)
         }
@@ -56,7 +57,7 @@ class BaseDVRouter(Router):
         self._changed = False
         # Cache DV adverts so we don't rebuild the same messages every round.
         self._routing_dirty = True
-        self._cached_adverts: Dict[Node, List[DVMessage]] = {}
+        self._cached_adverts: Dict[Node, Dict[Node, Tuple[float, Optional[Node], int]]] = {}
         # Buffer inbound DV so we relax once per round.
         self._pending_dirty = False
 
@@ -79,28 +80,27 @@ class BaseDVRouter(Router):
         entry = self._routing_table.get(dest)
         return entry.next_hop if entry else None
 
-    def outgoing_dv_messages(self) -> Mapping[Node, list[DVMessage]]:
+    def outgoing_dv_messages(self) -> Mapping[Node, Mapping[Node, Tuple[float, Optional[Node], int]]]:
         """
         Build DV adverts to send to each neighbour using the current table.
         """
         if self._routing_dirty:
             self._cached_adverts = {}
-            entries = list(self._routing_table.values())
             for neighbor in self._neighbor_costs:
-                # Reuse the same message objects per neighbour when routing is unchanged.
-                self._cached_adverts[neighbor] = [
-                    DVMessage(dest=entry.dest, cost=entry.cost, origin_hc=entry.origin_hc, epoch=entry.epoch)
-                    for entry in entries
-                ]
+                # Reuse the same advert maps per neighbour when routing is unchanged.
+                advert_map: Dict[Node, Tuple[float, Optional[Node], int]] = {}
+                for entry in self._routing_table.values():
+                    advert_map[entry.dest] = (entry.cost, entry.origin_hc, entry.epoch)
+                self._cached_adverts[neighbor] = advert_map
             self._routing_dirty = False
         return self._cached_adverts
 
-    def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
+    def handle_dv_message(self, src: Node, dest: Node, cost: float, origin_hc: Optional[Node], epoch: int) -> None:
         if src not in self._neighbor_costs:
             # Ignore messages from non-neighbours
             return
 
-        self._adverts.setdefault(src, {})[msg.dest] = msg
+        self._adverts.setdefault(src, {})[dest] = (cost, origin_hc, epoch)
         self._pending_dirty = True
 
     def apply_pending_updates(self) -> None:
@@ -121,7 +121,7 @@ class BaseDVRouter(Router):
         # Translate adverts into the form expected by the DV engine
         adverts_for_engine: Dict[Node, Dict[Node, float]] = {}
         for neighbor, dest_map in self._adverts.items():
-            adverts_for_engine[neighbor] = {dest: msg.cost for dest, msg in dest_map.items()}
+            adverts_for_engine[neighbor] = {dest: payload[0] for dest, payload in dest_map.items()}
 
         current_costs = {dest: entry.cost for dest, entry in self._routing_table.items()}
         new_costs = self._dv_engine.relax(
@@ -141,10 +141,11 @@ class BaseDVRouter(Router):
             if neighbor not in self._neighbor_costs:
                 continue
             base = self._neighbor_costs[neighbor]
-            for dest, msg in dest_map.items():
-                candidate = base + msg.cost
+            for dest, payload in dest_map.items():
+                msg_cost, msg_origin_hc, msg_epoch = payload
+                candidate = base + msg_cost
                 current = best.get(dest)
-                candidate_entry = (candidate, neighbor, msg.origin_hc, msg.epoch)
+                candidate_entry = (candidate, neighbor, msg_origin_hc, msg_epoch)
                 if current is None or self._is_better(candidate_entry, current):
                     best[dest] = candidate_entry
 
@@ -233,11 +234,11 @@ class DijkstraRouter(Router):
         entry = self._routing_table.get(dest)
         return entry.next_hop if entry else None
 
-    def outgoing_dv_messages(self) -> Mapping[Node, list[DVMessage]]:
+    def outgoing_dv_messages(self) -> Mapping[Node, Mapping[Node, tuple[float, Optional[Node], int]]]:
         # Pure Dijkstra router does not emit DV.
         return {}
 
-    def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
+    def handle_dv_message(self, src: Node, dest: Node, cost: float, origin_hc: Optional[Node], epoch: int) -> None:
         # Ignores DV; relies on local computation.
         return
 
@@ -285,7 +286,7 @@ class GroundStationRouter(BaseDVRouter):
         # Ground stations ignore inbound DV—they are the oracle.
         self._adverts.clear()
 
-    def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
+    def handle_dv_message(self, src: Node, dest: Node, cost: float, origin_hc: Optional[Node], epoch: int) -> None:
         # Ground stations stick to their Dijkstra oracle and ignore DV updates.
         return
 

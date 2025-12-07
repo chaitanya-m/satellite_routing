@@ -73,14 +73,14 @@ class Router(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def outgoing_dv_messages(self) -> Mapping[Node, list[DVMessage]]:
+    def outgoing_dv_messages(self) -> Mapping[Node, Mapping[Node, tuple[float, Optional[Node], int]]]:
         """
         Build DV adverts destined for each neighbour.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
+    def handle_dv_message(self, src: Node, dest: Node, cost: float, origin_hc: Optional[Node], epoch: int) -> None:
         """
         Process one incoming distance-vector message from neighbour src.
         """
