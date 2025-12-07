@@ -60,6 +60,9 @@ class BaseDVRouter(Router):
         self._cached_adverts: Dict[Node, Dict[Node, Tuple[float, Optional[Node], int]]] = {}
         # Buffer inbound DV so we relax once per round.
         self._pending_dirty = False
+        # Instrumentation: count DV relax work per router.
+        self._ops_examined = 0
+        self._ops_updates = 0
 
     # --- Router interface ---------------------------------------------------
 
@@ -74,6 +77,8 @@ class BaseDVRouter(Router):
         self._adverts = {n: adv for n, adv in self._adverts.items() if n in self._neighbor_costs}
         self._routing_dirty = True
         self._pending_dirty = False
+        self._ops_examined = 0
+        self._ops_updates = 0
         self._relax()
 
     def next_hop(self, dest: Node) -> Optional[Node]:
@@ -116,6 +121,9 @@ class BaseDVRouter(Router):
     def reset_changed_flag(self) -> None:
         """Clear the per-round change marker used by convergence checks."""
         self._changed = False
+        # Reset per-round instrumentation accumulators.
+        self._ops_examined = 0
+        self._ops_updates = 0
 
     def _relax(self) -> None:
         # Translate adverts into the form expected by the DV engine
@@ -146,8 +154,10 @@ class BaseDVRouter(Router):
                 candidate = base + msg_cost
                 current = best.get(dest)
                 candidate_entry = (candidate, neighbor, msg_origin_hc, msg_epoch)
+                self._ops_examined += 1
                 if current is None or self._is_better(candidate_entry, current):
                     best[dest] = candidate_entry
+                    self._ops_updates += 1
 
         # Ensure self-route exists
         best[self._node] = (0.0, self._node, self._node, self._epoch)

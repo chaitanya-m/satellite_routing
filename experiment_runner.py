@@ -220,7 +220,7 @@ def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
             for key in ("satellites", "ground_stations", "routers"):
                 if key in row and row[key] != "":
                     row[key] = int(row[key])
-            for key in ("avg_reachable", "min_reachable", "max_reachable", "duration_sec"):
+            for key in ("avg_reachable", "min_reachable", "max_reachable", "duration_sec", "avg_dv_examined", "avg_dv_updates"):
                 if key in row and row[key] != "":
                     row[key] = float(row[key])
             rows.append(row)
@@ -243,6 +243,8 @@ def append_run_row(path: Path, res: Dict[str, object]) -> None:
                 "avg_reachable",
                 "min_reachable",
                 "max_reachable",
+                "avg_dv_examined",
+                "avg_dv_updates",
             ],
         )
         if write_header:
@@ -259,6 +261,8 @@ def append_run_row(path: Path, res: Dict[str, object]) -> None:
                 "avg_reachable": metrics.get("avg_reachable"),
                 "min_reachable": metrics.get("min_reachable"),
                 "max_reachable": metrics.get("max_reachable"),
+                "avg_dv_examined": metrics.get("avg_dv_examined", 0.0),
+                "avg_dv_updates": metrics.get("avg_dv_updates", 0.0),
             }
         )
 
@@ -340,15 +344,23 @@ def _run_dv_until_stable(graph, routers: Dict[Node, Router], max_rounds: int) ->
 
 def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
     reachability_counts: List[int] = []
+    examined_counts: List[int] = []
+    update_counts: List[int] = []
     for r in routers.values():
         table = getattr(r, "_routing_table", {})
         reachability_counts.append(len(table))
+        if hasattr(r, "_ops_examined"):
+            examined_counts.append(getattr(r, "_ops_examined", 0))
+        if hasattr(r, "_ops_updates"):
+            update_counts.append(getattr(r, "_ops_updates", 0))
     avg_reach = sum(reachability_counts) / len(reachability_counts) if reachability_counts else 0.0
     return {
         "routers": len(routers),
         "avg_reachable": avg_reach,
         "min_reachable": min(reachability_counts) if reachability_counts else 0,
         "max_reachable": max(reachability_counts) if reachability_counts else 0,
+        "avg_dv_examined": (sum(examined_counts) / len(examined_counts)) if examined_counts else 0.0,
+        "avg_dv_updates": (sum(update_counts) / len(update_counts)) if update_counts else 0.0,
     }
 
 
@@ -367,6 +379,8 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
         "min_reachable",
         "max_reachable",
         "duration_sec",
+        "avg_dv_examined",
+        "avg_dv_updates",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -385,6 +399,8 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
                 "min_reachable": metrics.get("min_reachable"),
                 "max_reachable": metrics.get("max_reachable"),
                 "duration_sec": res.get("duration_sec", 0.0),
+                "avg_dv_examined": metrics.get("avg_dv_examined", 0.0),
+                "avg_dv_updates": metrics.get("avg_dv_updates", 0.0),
             }
             writer.writerow(row)
 
@@ -393,7 +409,15 @@ def write_aggregates_csv(aggregated: Iterable[Mapping[str, object]], path: Path)
     """
     Write aggregated metrics by policy to CSV.
     """
-    fieldnames = ["experiment", "policy", "satellites", "ground_stations", "runs", "avg_reachable", "avg_routers"]
+    fieldnames = [
+        "experiment",
+        "policy",
+        "satellites",
+        "ground_stations",
+        "runs",
+        "avg_reachable",
+        "avg_routers",
+    ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
