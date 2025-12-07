@@ -96,6 +96,8 @@ def run_experiments(
                     continue
                 tasks.append((exp, policy, seed))
 
+    print(f"[run] queued {len(tasks)} new tasks (existing runs: {len(seen_keys)})")
+
     new_results: List[Dict[str, object]] = []
     if tasks:
         if use_processes:
@@ -108,9 +110,7 @@ def run_experiments(
                     for future in as_completed(future_to_task):
                         exp_name, policy_val, seed = future_to_task[future]
                         try:
-                            start_run = time.time()
                             res = future.result()
-                            res["duration_sec"] = time.time() - start_run
                             new_results.append(res)
                             if runs_csv:
                                 append_run_row(runs_csv, res)
@@ -120,12 +120,12 @@ def run_experiments(
             except (PermissionError, NotImplementedError, OSError) as exc:
                 print(f"[run] process pool unavailable ({exc}), falling back to sequential execution")
                 use_processes = False
+        else:
+            print("[run] using sequential execution")
 
         if not use_processes:
             for exp, policy, seed in tasks:
-                start_run = time.time()
                 res = _run_task(asdict(exp), policy.value, seed)
-                res["duration_sec"] = time.time() - start_run
                 new_results.append(res)
                 if runs_csv:
                     append_run_row(runs_csv, res)
@@ -167,6 +167,7 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[
 
 
 def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict[str, object]:
+    start_run = time.time()
     exp = ExperimentConfig(
         name=str(exp_dict["name"]),
         satellites=int(exp_dict["satellites"]),
@@ -175,7 +176,9 @@ def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict
         ground_links=int(exp_dict["ground_links"]),
     )
     policy = RouteSelectionPolicy(policy_value)
-    return _run_single(exp, policy, seed)
+    res = _run_single(exp, policy, seed)
+    res["duration_sec"] = time.time() - start_run
+    return res
 
 
 def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
