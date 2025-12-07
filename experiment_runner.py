@@ -76,6 +76,7 @@ def run_experiments(config_path: Path) -> List[Dict[str, object]]:
             policy = RouteSelectionPolicy[policy_name]
             for offset in range(cfg.seed_count):
                 seed = cfg.seed + offset
+                print(f"[run] experiment={exp.name} policy={policy.value} seed={seed}")
                 summary = _run_single(exp, policy, seed)
                 results.append(summary)
     return results
