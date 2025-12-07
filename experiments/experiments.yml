@@ -16,13 +16,24 @@ experiments:
     ground_stations: 12
     sat_degree: 4
     ground_links: 4
-  - name: sats_500
-    satellites: 500
+  - name: sats_150
+    satellites: 150
+    ground_stations: 16
+    sat_degree: 5
+    ground_links: 5
+  - name: sats_200
+    satellites: 200
     ground_stations: 20
     sat_degree: 6
     ground_links: 6
-  - name: sats_1000
-    satellites: 1000
-    ground_stations: 30
-    sat_degree: 6
-    ground_links: 6
+  # Future larger runs:
+  # - name: sats_500
+  #   satellites: 500
+  #   ground_stations: 20
+  #   sat_degree: 6
+  #   ground_links: 6
+  # - name: sats_1000
+  #   satellites: 1000
+  #   ground_stations: 30
+  #   sat_degree: 6
+  #   ground_links: 6
