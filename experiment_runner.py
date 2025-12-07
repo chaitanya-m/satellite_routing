@@ -308,6 +308,11 @@ def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) 
         _run_dv_until_stable(graph, routers, max_rounds=5)
 
     metrics = _summarize_routes(routers)
+    if policy == RouteSelectionPolicy.DIJKSTRA_ONLY:
+        # DV never runs under this policy; zero out DV-specific instrumentation.
+        metrics["avg_dv_entries_examined"] = 0.0
+        metrics["avg_dv_entries_updated"] = 0.0
+        metrics["avg_dv_router_ops"] = 0.0
     return {
         "experiment": exp.name,
         "policy": policy.value,
