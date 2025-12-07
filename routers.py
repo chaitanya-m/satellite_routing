@@ -54,6 +54,9 @@ class BaseDVRouter(Router):
         }
         self._epoch = 0
         self._changed = False
+        # Cache DV adverts so we don't rebuild the same messages every round.
+        self._routing_dirty = True
+        self._cached_adverts: Dict[Node, List[DVMessage]] = {}
 
     # --- Router interface ---------------------------------------------------
 
@@ -66,6 +69,7 @@ class BaseDVRouter(Router):
         self._neighbor_costs = dict(g.outgoing(self._node))
         # Drop adverts from nodes that are no longer neighbours
         self._adverts = {n: adv for n, adv in self._adverts.items() if n in self._neighbor_costs}
+        self._routing_dirty = True
         self._relax()
 
     def next_hop(self, dest: Node) -> Optional[Node]:
@@ -76,13 +80,17 @@ class BaseDVRouter(Router):
         """
         Build DV adverts to send to each neighbour using the current table.
         """
-        adverts: Dict[Node, List[DVMessage]] = {}
-        for neighbor in self._neighbor_costs:
-            adverts[neighbor] = [
-                DVMessage(dest=entry.dest, cost=entry.cost, origin_hc=entry.origin_hc, epoch=entry.epoch)
-                for entry in self._routing_table.values()
-            ]
-        return adverts
+        if self._routing_dirty:
+            self._cached_adverts = {}
+            entries = list(self._routing_table.values())
+            for neighbor in self._neighbor_costs:
+                # Reuse the same message objects per neighbour when routing is unchanged.
+                self._cached_adverts[neighbor] = [
+                    DVMessage(dest=entry.dest, cost=entry.cost, origin_hc=entry.origin_hc, epoch=entry.epoch)
+                    for entry in entries
+                ]
+            self._routing_dirty = False
+        return self._cached_adverts
 
     def handle_dv_message(self, src: Node, msg: DVMessage) -> None:
         if src not in self._neighbor_costs:
@@ -144,6 +152,7 @@ class BaseDVRouter(Router):
         changed = updated != self._routing_table
         if changed:
             self._routing_table = updated
+            self._routing_dirty = True
         self._changed = self._changed or changed
 
     def _is_better(
