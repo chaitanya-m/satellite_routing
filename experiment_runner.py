@@ -307,7 +307,7 @@ def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) 
     if policy != RouteSelectionPolicy.DIJKSTRA_ONLY:
         _run_dv_until_stable(graph, routers, max_rounds=5)
 
-    metrics = _summarize_routes(routers)
+    metrics = _summarize_routes(routers, satellite_nodes=satellites)
     if policy == RouteSelectionPolicy.DIJKSTRA_ONLY:
         # DV never runs under this policy; zero out DV-specific instrumentation.
         metrics["avg_dv_entries_examined"] = 0.0
@@ -367,14 +367,17 @@ def _run_dv_until_stable(graph, routers: Dict[Node, Router], max_rounds: int) ->
             break
 
 
-def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, Any]:
+def _summarize_routes(routers: Mapping[Node, Router], satellite_nodes: Iterable[Node] | None = None) -> Dict[str, Any]:
     reachability_counts: List[int] = []
     examined_counts: List[int] = []
     update_counts: List[int] = []
     total_ops: List[int] = []
+    sat_filter = set(satellite_nodes) if satellite_nodes is not None else None
     for r in routers.values():
         table = getattr(r, "_routing_table", {})
         reachability_counts.append(len(table))
+        if sat_filter is not None and r.node not in sat_filter:
+            continue
         if hasattr(r, "_ops_examined"):
             examined = getattr(r, "_ops_examined", 0)
             examined_counts.append(examined)
