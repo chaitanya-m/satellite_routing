@@ -70,17 +70,12 @@ experiments:
     # 2 experiments * 2 seeds * 2 policies = 8 runs
     assert len(results) == 8
     aggregated = aggregate_by_policy(results)
-    assert set(aggregated.keys()) == {
-        RouteSelectionPolicy.DV_ONLY.value,
-        RouteSelectionPolicy.DIJKSTRA_ONLY.value,
-    }
-    for policy, metrics in aggregated.items():
-        m = cast(Dict[str, float], metrics)
-        assert m["runs"] == 4.0  # 2 experiments * 2 seeds per policy
-        assert m["avg_routers"] > 0
-        assert m["avg_reachable"] >= 0.0
-    # Aggregated runs should equal total runs per policy
-    assert sum(cast(Dict[str, float], m)["runs"] for m in aggregated.values()) == 8.0
+    # Aggregated per (experiment, policy)
+    assert len(aggregated) == 4
+    for row in aggregated:
+        assert row["runs"] == 2.0  # 2 seeds per experiment/policy
+        assert row["avg_routers"] > 0
+        assert row["avg_reachable"] >= 0.0
 
     # Also test writing to CSV for both runs and aggregates
     runs_csv = tmp_path / "runs.csv"
@@ -119,9 +114,9 @@ experiments:
     results = run_experiments(cfg, use_processes=False)
     aggregated = aggregate_by_policy(results)
 
-    # Only one policy and two seeds; aggregate should average the raw metrics.
-    assert set(aggregated.keys()) == {RouteSelectionPolicy.DV_ONLY.value}
-    metrics = cast(Dict[str, float], aggregated[RouteSelectionPolicy.DV_ONLY.value])
+    # Only one experiment/policy and two seeds; aggregate should average the raw metrics.
+    assert len(aggregated) == 1
+    metrics = cast(Dict[str, float], aggregated[0])
     raw_metrics = [cast(Dict[str, float], r["metrics"]) for r in results]
     assert metrics["runs"] == 2.0
     expected_avg_reach = sum(r["avg_reachable"] for r in raw_metrics) / 2
@@ -162,9 +157,9 @@ experiments:
     assert counts["sats_10"] == 2
 
     aggregated = aggregate_by_policy(results)
-    assert set(aggregated.keys()) == {RouteSelectionPolicy.DV_ONLY.value}
-    m = cast(Dict[str, float], aggregated[RouteSelectionPolicy.DV_ONLY.value])
-    assert m["runs"] == 4.0
+    assert len(aggregated) == 2  # one row per experiment/policy
+    for row in aggregated:
+        assert row["runs"] == 2.0
 
     runs_csv = tmp_path / "runs_two.csv"
     agg_csv = tmp_path / "aggregates_two.csv"

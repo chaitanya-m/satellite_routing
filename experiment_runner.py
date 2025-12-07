@@ -140,14 +140,19 @@ def run_experiments(
     return results
 
 
-def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[str, float]]:
+def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> List[Dict[str, float]]:
     """
-    Aggregate metrics across runs by policy for quick comparisons.
+    Aggregate metrics per (experiment, policy), averaging only across seeds.
     """
-    accum: Dict[str, Dict[str, float]] = {}
-    counts: Dict[str, int] = {}
+    accum: Dict[tuple[str, str], Dict[str, float]] = {}
+    counts: Dict[tuple[str, str], int] = {}
+    meta: Dict[tuple[str, str], Dict[str, object]] = {}
+
     for res in results:
+        exp = str(res["experiment"])
         policy = str(res["policy"])
+        key = (exp, policy)
+
         metrics = res.get("metrics")
         if metrics is None:
             # Resume path: metrics are flattened at the top level in runs.csv.
@@ -155,20 +160,36 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[
                 "avg_reachable": res.get("avg_reachable", 0.0),
                 "routers": res.get("routers", 0.0),
             }
-        counts[policy] = counts.get(policy, 0) + 1
-        bucket = accum.setdefault(policy, {"avg_reachable_sum": 0.0, "routers_sum": 0.0})
+
+        counts[key] = counts.get(key, 0) + 1
+        bucket = accum.setdefault(key, {"avg_reachable_sum": 0.0, "routers_sum": 0.0})
         bucket["avg_reachable_sum"] += float(metrics.get("avg_reachable", 0.0))
         bucket["routers_sum"] += float(metrics.get("routers", 0.0))
 
-    aggregated: Dict[str, Dict[str, float]] = {}
-    for policy, sums in accum.items():
-        n = counts[policy]
-        aggregated[policy] = {
-            "avg_reachable": sums["avg_reachable_sum"] / n if n else 0.0,
-            "avg_routers": sums["routers_sum"] / n if n else 0.0,
-            "runs": float(n),
+        meta[key] = {
+            "experiment": exp,
+            "policy": policy,
+            "satellites": int(res.get("satellites", 0)),
+            "ground_stations": int(res.get("ground_stations", 0)),
         }
-    return aggregated
+
+    aggregated_rows: List[Dict[str, float]] = []
+    for key, sums in accum.items():
+        n = counts[key]
+        info = meta[key]
+        aggregated_rows.append(
+            {
+                "experiment": info["experiment"],
+                "policy": info["policy"],
+                "satellites": info["satellites"],
+                "ground_stations": info["ground_stations"],
+                "runs": float(n),
+                "avg_reachable": sums["avg_reachable_sum"] / n if n else 0.0,
+                "avg_routers": sums["routers_sum"] / n if n else 0.0,
+            }
+        )
+
+    return aggregated_rows
 
 
 def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict[str, object]:
@@ -363,22 +384,25 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
             writer.writerow(row)
 
 
-def write_aggregates_csv(aggregated: Mapping[str, Mapping[str, float]], path: Path) -> None:
+def write_aggregates_csv(aggregated: Iterable[Mapping[str, object]], path: Path) -> None:
     """
     Write aggregated metrics by policy to CSV.
     """
-    fieldnames = ["policy", "runs", "avg_reachable", "avg_routers"]
+    fieldnames = ["experiment", "policy", "satellites", "ground_stations", "runs", "avg_reachable", "avg_routers"]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for policy, metrics in aggregated.items():
+        for row in aggregated:
             writer.writerow(
                 {
-                    "policy": policy,
-                    "runs": metrics.get("runs", 0.0),
-                    "avg_reachable": metrics.get("avg_reachable", 0.0),
-                    "avg_routers": metrics.get("avg_routers", 0.0),
+                    "experiment": row.get("experiment", ""),
+                    "policy": row.get("policy", ""),
+                    "satellites": row.get("satellites", 0),
+                    "ground_stations": row.get("ground_stations", 0),
+                    "runs": row.get("runs", 0.0),
+                    "avg_reachable": row.get("avg_reachable", 0.0),
+                    "avg_routers": row.get("avg_routers", 0.0),
                 }
             )
 
