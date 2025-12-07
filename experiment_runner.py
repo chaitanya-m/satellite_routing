@@ -108,11 +108,13 @@ def run_experiments(
                     for future in as_completed(future_to_task):
                         exp_name, policy_val, seed = future_to_task[future]
                         try:
+                            start_run = time.time()
                             res = future.result()
+                            res["duration_sec"] = time.time() - start_run
                             new_results.append(res)
                             if runs_csv:
                                 append_run_row(runs_csv, res)
-                            print(f"[run] completed experiment={exp_name} policy={policy_val} seed={seed}")
+                            print(f"[run] completed experiment={exp_name} policy={policy_val} seed={seed} duration={res['duration_sec']:.2f}s")
                         except Exception as exc:
                             print(f"[run] failed experiment={exp_name} policy={policy_val} seed={seed}: {exc}")
             except (PermissionError, NotImplementedError, OSError) as exc:
@@ -121,11 +123,13 @@ def run_experiments(
 
         if not use_processes:
             for exp, policy, seed in tasks:
+                start_run = time.time()
                 res = _run_task(asdict(exp), policy.value, seed)
+                res["duration_sec"] = time.time() - start_run
                 new_results.append(res)
                 if runs_csv:
                     append_run_row(runs_csv, res)
-                print(f"[run] completed experiment={exp.name} policy={policy.value} seed={seed}")
+                print(f"[run] completed experiment={exp.name} policy={policy.value} seed={seed} duration={res['duration_sec']:.2f}s")
 
     results = existing_runs + new_results
 
@@ -317,6 +321,7 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
         "avg_reachable",
         "min_reachable",
         "max_reachable",
+        "duration_sec",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -334,6 +339,7 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
                 "avg_reachable": metrics.get("avg_reachable"),
                 "min_reachable": metrics.get("min_reachable"),
                 "max_reachable": metrics.get("max_reachable"),
+                "duration_sec": res.get("duration_sec", 0.0),
             }
             writer.writerow(row)
 

@@ -1,6 +1,6 @@
 from typing import Any, Dict, cast
 from collections import Counter
-import pytest
+import pandas as pd
 from pathlib import Path
 
 from experiment_runner import (
@@ -31,7 +31,7 @@ experiments:
     """
     )
 
-    results = run_experiments(cfg)
+    results = run_experiments(cfg, use_processes=False)
     assert len(results) == 4  # 2 policies * 2 seeds
     policy_counts = Counter(res["policy"] for res in results)
     assert policy_counts[RouteSelectionPolicy.DV_ONLY.value] == 2
@@ -66,7 +66,7 @@ experiments:
 """
     )
 
-    results = run_experiments(cfg)
+    results = run_experiments(cfg, use_processes=False)
     # 2 experiments * 2 seeds * 2 policies = 8 runs
     assert len(results) == 8
     aggregated = aggregate_by_policy(results)
@@ -89,6 +89,13 @@ experiments:
     write_aggregates_csv(aggregated, agg_csv)
     assert runs_csv.exists()
     assert agg_csv.exists()
+    runs_df = pd.read_csv(runs_csv)
+    agg_df = pd.read_csv(agg_csv)
+    assert len(runs_df) == len(results)
+    assert len(agg_df) == len(aggregated)
+    print("Runs DataFrame:\n", runs_df)
+    print("Aggregates DataFrame:\n", agg_df)
+    assert "duration_sec" in runs_df.columns
 
 
 def test_aggregated_values_reflect_inputs():
@@ -109,7 +116,7 @@ experiments:
 """
     )
 
-    results = run_experiments(cfg)
+    results = run_experiments(cfg, use_processes=False)
     aggregated = aggregate_by_policy(results)
 
     # Only one policy and two seeds; aggregate should average the raw metrics.
@@ -146,7 +153,7 @@ experiments:
 """
     )
 
-    results = run_experiments(cfg)
+    results = run_experiments(cfg, use_processes=False)
     # 2 experiments * 2 seeds * 1 policy = 4 runs
     assert len(results) == 4
     # Ensure each experiment appears twice (once per seed)
@@ -165,3 +172,10 @@ experiments:
     write_aggregates_csv(aggregated, agg_csv)
     assert runs_csv.exists()
     assert agg_csv.exists()
+    runs_df = pd.read_csv(runs_csv)
+    agg_df = pd.read_csv(agg_csv)
+    assert len(runs_df) == len(results)
+    assert len(agg_df) == len(aggregated)
+    print("Two-experiment runs DataFrame:\n", runs_df)
+    print("Two-experiment aggregates DataFrame:\n", agg_df)
+    assert "duration_sec" in runs_df.columns
