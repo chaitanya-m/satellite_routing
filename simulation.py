@@ -29,3 +29,9 @@ def run_dv_round(graph: Graph, routers: Dict[Node, Router]) -> None:
             continue
         for msg in msgs:
             dst_router.handle_dv_message(src, msg)
+
+    # Apply DV relaxations once per router after all messages for the round arrive.
+    for router in routers.values():
+        apply = getattr(router, "apply_pending_updates", None)
+        if apply:
+            apply()

@@ -57,6 +57,8 @@ class BaseDVRouter(Router):
         # Cache DV adverts so we don't rebuild the same messages every round.
         self._routing_dirty = True
         self._cached_adverts: Dict[Node, List[DVMessage]] = {}
+        # Buffer inbound DV so we relax once per round.
+        self._pending_dirty = False
 
     # --- Router interface ---------------------------------------------------
 
@@ -70,6 +72,7 @@ class BaseDVRouter(Router):
         # Drop adverts from nodes that are no longer neighbours
         self._adverts = {n: adv for n, adv in self._adverts.items() if n in self._neighbor_costs}
         self._routing_dirty = True
+        self._pending_dirty = False
         self._relax()
 
     def next_hop(self, dest: Node) -> Optional[Node]:
@@ -98,7 +101,15 @@ class BaseDVRouter(Router):
             return
 
         self._adverts.setdefault(src, {})[msg.dest] = msg
-        self._relax()
+        self._pending_dirty = True
+
+    def apply_pending_updates(self) -> None:
+        """
+        Apply any queued DV changes once per round to avoid repeated relax calls.
+        """
+        if self._pending_dirty:
+            self._relax()
+            self._pending_dirty = False
 
     # --- Internal helpers ---------------------------------------------------
 
