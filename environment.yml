@@ -2,4 +2,5 @@ name: satsim
 dependencies:
   - python=3.14
   - pytest
+  - pandas
   - pyyaml
