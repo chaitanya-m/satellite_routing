@@ -148,7 +148,13 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> Dict[str, Dict[
     counts: Dict[str, int] = {}
     for res in results:
         policy = str(res["policy"])
-        metrics = res.get("metrics", {})
+        metrics = res.get("metrics")
+        if metrics is None:
+            # Resume path: metrics are flattened at the top level in runs.csv.
+            metrics = {
+                "avg_reachable": res.get("avg_reachable", 0.0),
+                "routers": res.get("routers", 0.0),
+            }
         counts[policy] = counts.get(policy, 0) + 1
         bucket = accum.setdefault(policy, {"avg_reachable_sum": 0.0, "routers_sum": 0.0})
         bucket["avg_reachable_sum"] += float(metrics.get("avg_reachable", 0.0))
@@ -187,7 +193,14 @@ def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
         reader = csv.DictReader(f)
         rows: List[Dict[str, object]] = []
         for row in reader:
+            # Normalize numeric fields so aggregation works on resumed runs.
             row["seed"] = int(row.get("seed", 0))
+            for key in ("satellites", "ground_stations", "routers"):
+                if key in row and row[key] != "":
+                    row[key] = int(row[key])
+            for key in ("avg_reachable", "min_reachable", "max_reachable", "duration_sec"):
+                if key in row and row[key] != "":
+                    row[key] = float(row[key])
             rows.append(row)
         return rows
 
