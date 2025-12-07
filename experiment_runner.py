@@ -220,7 +220,14 @@ def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
             for key in ("satellites", "ground_stations", "routers"):
                 if key in row and row[key] != "":
                     row[key] = int(row[key])
-            for key in ("avg_reachable", "min_reachable", "max_reachable", "duration_sec", "avg_dv_examined", "avg_dv_updates"):
+            for key in (
+                "avg_reachable",
+                "min_reachable",
+                "max_reachable",
+                "duration_sec",
+                "avg_dv_entries_examined",
+                "avg_dv_entries_updated",
+            ):
                 if key in row and row[key] != "":
                     row[key] = float(row[key])
             rows.append(row)
@@ -243,8 +250,8 @@ def append_run_row(path: Path, res: Dict[str, object]) -> None:
                 "avg_reachable",
                 "min_reachable",
                 "max_reachable",
-                "avg_dv_examined",
-                "avg_dv_updates",
+                "avg_dv_entries_examined",
+                "avg_dv_entries_updated",
             ],
         )
         if write_header:
@@ -359,8 +366,8 @@ def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
         "avg_reachable": avg_reach,
         "min_reachable": min(reachability_counts) if reachability_counts else 0,
         "max_reachable": max(reachability_counts) if reachability_counts else 0,
-        "avg_dv_examined": (sum(examined_counts) / len(examined_counts)) if examined_counts else 0.0,
-        "avg_dv_updates": (sum(update_counts) / len(update_counts)) if update_counts else 0.0,
+        "avg_dv_entries_examined": (sum(examined_counts) / len(examined_counts)) if examined_counts else 0.0,
+        "avg_dv_entries_updated": (sum(update_counts) / len(update_counts)) if update_counts else 0.0,
     }
 
 
@@ -379,8 +386,8 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
         "min_reachable",
         "max_reachable",
         "duration_sec",
-        "avg_dv_examined",
-        "avg_dv_updates",
+        "avg_dv_entries_examined",
+        "avg_dv_entries_updated",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -399,8 +406,8 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
                 "min_reachable": metrics.get("min_reachable"),
                 "max_reachable": metrics.get("max_reachable"),
                 "duration_sec": res.get("duration_sec", 0.0),
-                "avg_dv_examined": metrics.get("avg_dv_examined", 0.0),
-                "avg_dv_updates": metrics.get("avg_dv_updates", 0.0),
+                "avg_dv_entries_examined": metrics.get("avg_dv_entries_examined", 0.0),
+                "avg_dv_entries_updated": metrics.get("avg_dv_entries_updated", 0.0),
             }
             writer.writerow(row)
 
