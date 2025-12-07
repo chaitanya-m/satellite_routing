@@ -117,19 +117,17 @@ def generate_poisson_constellation(
     seed: Optional[int] = None,
 ) -> List[SatelliteNode]:
     """
-    Generate a Poisson-distributed satellite constellation across latitude bands.
+    Generate a fixed-size constellation with randomized placement per latitude band.
 
     How it works:
-    - Take the global expected_count and split it across the provided bands
-      proportional to each band's weight; this produces a per-band rate λ
-      (lambda) that reflects how popular that latitude shell is.
-    - For each band, sample an actual population from a Poisson distribution
-      with rate λ (Knuth sampler). Poisson variation keeps total counts
-      reasonable without hard-coding a fixed number per band, which better
-      mimics deployment noise and avoids perfect symmetry.
-    - For every sampled satellite, draw (lat, lon) uniformly by area within
-      the band's latitude bounds (sin-lat transform) and assign a constant
-      altitude_km. Nodes are sequentially numbered SAT-0, SAT-1, ...
+    - We still use band weights to decide how many satellites go into each band,
+      but we normalize the counts so the total equals expected_count exactly.
+      Raw variation is injected by sampling provisional counts per band and then
+      scaling them back to the fixed total, preserving randomness while keeping
+      the experiment size stable.
+    - For every satellite, draw (lat, lon) uniformly by area within the band's
+      latitude bounds (sin-lat transform) and assign a constant altitude_km.
+      Nodes are sequentially numbered SAT-0, SAT-1, ...
     - If seed is provided, rng draws are deterministic for reproducibility.
 
     Args:
@@ -150,9 +148,8 @@ def generate_poisson_constellation(
         raise ValueError("Latitude band weights must sum to a positive value.")
     satellites: List[SatelliteNode] = []
 
-    for idx, band in enumerate(bands):
-        lambda_band = expected_count * (band.weight / total_weight)
-        count = _poisson(rng, lambda_band)
+    counts = _allocate_counts(expected_count, bands, rng)
+    for band, count in zip(bands, counts):
         for _ in range(count):
             lat, lon = _sample_lat_lon(rng, band.min_lat, band.max_lat)
             sat_id = f"SAT-{len(satellites)}"
@@ -167,7 +164,7 @@ def generate_ground_stations(
     seed: Optional[int] = None,
 ) -> List[GroundStationNode]:
     """
-    Generate ground stations with Poisson counts per latitude band.
+    Generate a fixed-size set of ground stations with randomized placement.
     """
     rng = random.Random(seed)
     total_weight = sum(b.weight for b in bands)
@@ -175,12 +172,58 @@ def generate_ground_stations(
         raise ValueError("Latitude band weights must sum to a positive value.")
     stations: List[GroundStationNode] = []
 
-    for band in bands:
-        lambda_band = expected_count * (band.weight / total_weight)
-        count = _poisson(rng, lambda_band)
+    counts = _allocate_counts(expected_count, bands, rng)
+    for band, count in zip(bands, counts):
         for _ in range(count):
             lat, lon = _sample_lat_lon(rng, band.min_lat, band.max_lat)
             gs_id = f"GS-{len(stations)}"
             stations.append(GroundStationNode(gs_id, lat, lon))
 
     return stations
+
+
+def _allocate_counts(expected_total: int, bands: Sequence[LatBand], rng: random.Random) -> List[int]:
+    """
+    Allocate a fixed total count across bands with randomness, then normalize to the total.
+
+    We first draw provisional counts proportional to band weight with a bit of Poisson noise,
+    then rescale so the sum equals expected_total exactly. This preserves randomness while
+    keeping experiment sizes stable and comparable.
+    """
+    if expected_total <= 0:
+        return [0 for _ in bands]
+
+    weight_sum = sum(b.weight for b in bands)
+    # Provisional noisy counts
+    provisional: List[int] = []
+    for band in bands:
+        lambda_band = expected_total * (band.weight / weight_sum)
+        provisional.append(max(0, _poisson(rng, lambda_band)))
+
+    total_provisional = sum(provisional)
+    if total_provisional <= 0:
+        # Fall back to deterministic proportional allocation.
+        proportions = [b.weight / weight_sum for b in bands]
+        return _round_to_total(proportions, expected_total)
+
+    # Scale provisional counts to hit the exact total.
+    scaled = [p / total_provisional * expected_total for p in provisional]
+    return _round_to_total(scaled, expected_total)
+
+
+def _round_to_total(values: Sequence[float], target_total: int) -> List[int]:
+    """
+    Round a sequence of floats so the integer outputs sum to target_total.
+    """
+    ints = [int(math.floor(v)) for v in values]
+    remainder = target_total - sum(ints)
+    # Distribute the remaining units to the largest fractional parts.
+    frac_parts = sorted(
+        [(idx, val - math.floor(val)) for idx, val in enumerate(values)],
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    for i in range(remainder):
+        idx, _ = frac_parts[i % len(frac_parts)]
+        ints[idx] += 1
+    return ints

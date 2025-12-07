@@ -169,6 +169,7 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> List[Dict[str, 
         meta[key] = {
             "experiment": exp,
             "policy": policy,
+            # Use the actual sampled counts recorded on the run.
             "satellites": int(res.get("satellites", 0)),
             "ground_stations": int(res.get("ground_stations", 0)),
         }
@@ -271,6 +272,9 @@ def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) 
         ground_links=exp.ground_links,
     )
 
+    actual_sats = len(satellites)
+    actual_ground = len(ground)
+
     dv_engine = SimpleDistanceVectorEngine()
     dijkstra_engine: DijkstraEngine = SimpleDijkstraEngine()
 
@@ -284,8 +288,9 @@ def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) 
         "experiment": exp.name,
         "policy": policy.value,
         "seed": seed,
-        "satellites": exp.satellites,
-        "ground_stations": exp.ground_stations,
+        # Record actual sampled counts, not just expectations.
+        "satellites": actual_sats,
+        "ground_stations": actual_ground,
         "metrics": metrics,
     }
 
