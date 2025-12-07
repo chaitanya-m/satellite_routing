@@ -1,0 +1,9 @@
+# Bytecode and caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS noise
+.DS_Store
+
+# Experiment outputs
