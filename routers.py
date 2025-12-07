@@ -239,6 +239,10 @@ class DijkstraRouter(Router):
                 continue
             routes[dest] = RouteEntry(dest, next_hop, cost, self._node, epoch)
         self._routing_table = routes
+        # Record ops from the Dijkstra engine if available.
+        if hasattr(self._dijkstra, "last_edges_examined"):
+            self._ops_examined = getattr(self._dijkstra, "last_edges_examined", 0)
+            self._ops_updates = getattr(self._dijkstra, "last_relaxed", 0)
 
     def next_hop(self, dest: Node) -> Optional[Node]:
         entry = self._routing_table.get(dest)
