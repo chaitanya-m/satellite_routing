@@ -94,7 +94,7 @@ def test_dijkstra_router_ignores_dv_messages():
 
 
 def test_run_dv_round_differs_by_policy():
-    """Simulation helper should reflect policy: DV_ONLY vs PREFER_HC_EPOCH yield different next hops."""
+    """Simulation helper should reflect policy: DV_ONLY vs ORACLE_DV yield different next hops."""
     original_policy = routers.ROUTE_SELECTION_POLICY
 
     def run_policy(policy: RouteSelectionPolicy):
@@ -136,7 +136,7 @@ def test_run_dv_round_differs_by_policy():
 
     try:
         nh_dv_only, cost_dv_only = run_policy(RouteSelectionPolicy.DV_ONLY)
-        nh_hc, cost_hc = run_policy(RouteSelectionPolicy.PREFER_HC_EPOCH)
+        nh_hc, cost_hc = run_policy(RouteSelectionPolicy.ORACLE_DV)
     finally:
         set_route_selection_policy(original_policy)
 

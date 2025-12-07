@@ -69,9 +69,9 @@ def test_satellite_learns_ground_route_via_dv():
 
 
 def test_satellite_prefers_fresh_ground_epoch_over_cheaper_neighbor():
-    """With PREFER_HC_EPOCH, satellites prefer fresher HC adverts even if neighbor path looks cheaper."""
+    """With ORACLE_DV, satellites prefer fresher HC adverts even if neighbor path looks cheaper."""
     original_policy = routers.ROUTE_SELECTION_POLICY
-    set_route_selection_policy(RouteSelectionPolicy.PREFER_HC_EPOCH)
+    set_route_selection_policy(RouteSelectionPolicy.ORACLE_DV)
     try:
         gs = DummyNode("GS")
         s1 = DummyNode("S1")

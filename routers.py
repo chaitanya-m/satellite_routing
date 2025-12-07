@@ -20,12 +20,12 @@ class RouteSelectionPolicy(Enum):
     Global route-selection policy.
 
     DV_ONLY: prefer the cheapest DV cost (no HC/epoch bias).
-    PREFER_HC_EPOCH: prefer high-compute origins with fresher epochs, then cost.
+    ORACLE_DV: prefer high-compute origins with fresher epochs, then cost.
     DIJKSTRA_ONLY: bypass DV entirely and rely on local Dijkstra at all nodes.
     """
 
     DV_ONLY = "dv_only"
-    PREFER_HC_EPOCH = "prefer_hc_epoch"
+    ORACLE_DV = "oracle_dv"
     DIJKSTRA_ONLY = "dijkstra_only"
 
 
@@ -186,7 +186,7 @@ class BaseDVRouter(Router):
         cand_hc = cand_origin is not None
         curr_hc = curr_origin is not None
 
-        if ROUTE_SELECTION_POLICY == RouteSelectionPolicy.PREFER_HC_EPOCH:
+        if ROUTE_SELECTION_POLICY == RouteSelectionPolicy.ORACLE_DV:
             # Prefer high-compute origin with fresher epoch.
             if cand_hc and curr_hc:
                 if cand_epoch != curr_epoch:
