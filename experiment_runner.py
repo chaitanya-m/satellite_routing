@@ -281,8 +281,8 @@ def append_run_row(path: Path, res: Dict[str, Any]) -> None:
                 "avg_reachable": metrics.get("avg_reachable"),
                 "min_reachable": metrics.get("min_reachable"),
                 "max_reachable": metrics.get("max_reachable"),
-                "avg_dv_examined": metrics.get("avg_dv_examined", 0.0),
-                "avg_dv_updates": metrics.get("avg_dv_updates", 0.0),
+                "avg_dv_entries_examined": metrics.get("avg_dv_entries_examined", 0.0),
+                "avg_dv_entries_updated": metrics.get("avg_dv_entries_updated", 0.0),
             }
         )
 
