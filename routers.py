@@ -53,6 +53,7 @@ class BaseDVRouter(Router):
             node: RouteEntry(node, node, 0.0, node, 0)
         }
         self._epoch = 0
+        self._changed = False
 
     # --- Router interface ---------------------------------------------------
 
@@ -92,6 +93,10 @@ class BaseDVRouter(Router):
         self._relax()
 
     # --- Internal helpers ---------------------------------------------------
+
+    def reset_changed_flag(self) -> None:
+        """Clear the per-round change marker used by convergence checks."""
+        self._changed = False
 
     def _relax(self) -> None:
         # Translate adverts into the form expected by the DV engine
@@ -135,7 +140,11 @@ class BaseDVRouter(Router):
                 continue
             updated[dest] = RouteEntry(dest, next_hop, cost, origin_hc, epoch)
 
-        self._routing_table = updated
+        # Mark if anything actually changed; avoid churn when stable.
+        changed = updated != self._routing_table
+        if changed:
+            self._routing_table = updated
+        self._changed = self._changed or changed
 
     def _is_better(
         self, candidate: tuple[float, Node, Optional[Node], int], current: tuple[float, Node, Optional[Node], int]

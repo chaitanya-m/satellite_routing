@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Sequence, Set, Tuple
-import copy
 import csv
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
@@ -285,15 +284,19 @@ def _build_routers(
 
 
 def _run_dv_until_stable(graph, routers: Dict[Node, Router], max_rounds: int) -> None:
-    prev_tables: Mapping[Node, object] = {}
+    for r in routers.values():
+        reset = getattr(r, "reset_changed_flag", None)
+        if reset:
+            reset()
+
     for _ in range(max_rounds):
+        for r in routers.values():
+            reset = getattr(r, "reset_changed_flag", None)
+            if reset:
+                reset()
         run_dv_round(graph, routers)
-        tables: Mapping[Node, object] = {
-            node: copy.deepcopy(getattr(r, "_routing_table", {})) for node, r in routers.items()
-        }
-        if tables == prev_tables:
+        if not any(getattr(r, "_changed", False) for r in routers.values()):
             break
-        prev_tables = tables
 
 
 def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
