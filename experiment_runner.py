@@ -191,12 +191,76 @@ def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
     }
 
 
+def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
+    """
+    Write per-run results to CSV for downstream analysis.
+    """
+    import csv
+
+    fieldnames = [
+        "experiment",
+        "policy",
+        "seed",
+        "satellites",
+        "ground_stations",
+        "routers",
+        "avg_reachable",
+        "min_reachable",
+        "max_reachable",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for res in results:
+            metrics = res.get("metrics", {})
+            row = {
+                "experiment": res.get("experiment"),
+                "policy": res.get("policy"),
+                "seed": res.get("seed"),
+                "satellites": res.get("satellites"),
+                "ground_stations": res.get("ground_stations"),
+                "routers": metrics.get("routers"),
+                "avg_reachable": metrics.get("avg_reachable"),
+                "min_reachable": metrics.get("min_reachable"),
+                "max_reachable": metrics.get("max_reachable"),
+            }
+            writer.writerow(row)
+
+
+def write_aggregates_csv(aggregated: Mapping[str, Mapping[str, float]], path: Path) -> None:
+    """
+    Write aggregated metrics by policy to CSV.
+    """
+    import csv
+
+    fieldnames = ["policy", "runs", "avg_reachable", "avg_routers"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for policy, metrics in aggregated.items():
+            writer.writerow(
+                {
+                    "policy": policy,
+                    "runs": metrics.get("runs", 0.0),
+                    "avg_reachable": metrics.get("avg_reachable", 0.0),
+                    "avg_routers": metrics.get("avg_routers", 0.0),
+                }
+            )
+
+
 def main() -> None:
     config_path = Path(__file__).parent / "experiments" / "experiments.yml"
     results = run_experiments(config_path)
     for res in results:
         print(res)
     print("Aggregated by policy:", aggregate_by_policy(results))
+
+    out_dir = Path(__file__).parent / "experiments" / "results"
+    write_results_csv(results, out_dir / "runs.csv")
+    write_aggregates_csv(aggregate_by_policy(results), out_dir / "aggregates.csv")
+    print(f"Wrote runs to {out_dir / 'runs.csv'} and aggregates to {out_dir / 'aggregates.csv'}")
 
 
 if __name__ == "__main__":
