@@ -8,24 +8,24 @@ route_selection_policies:
 experiments:
   - name: sats_50
     satellites: 50
-    ground_stations: 8
-    sat_degree: 4
-    ground_links: 4
+    ground_stations: 20
+    sat_degree: 5
+    ground_links: 5
   - name: sats_100
     satellites: 100
-    ground_stations: 12
-    sat_degree: 4
-    ground_links: 4
+    ground_stations: 20
+    sat_degree: 5
+    ground_links: 5
   - name: sats_150
     satellites: 150
-    ground_stations: 16
+    ground_stations: 20
     sat_degree: 5
     ground_links: 5
   - name: sats_200
     satellites: 200
     ground_stations: 20
-    sat_degree: 6
-    ground_links: 6
+    sat_degree: 5
+    ground_links: 5
   # Future larger runs:
   # - name: sats_500
   #   satellites: 500
