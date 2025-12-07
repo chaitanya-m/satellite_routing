@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Set, Tuple
 import csv
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
@@ -75,14 +75,16 @@ def run_experiments(
     aggregates_csv: Path | None = None,
     max_workers: int | None = None,
     use_processes: bool = True,
-) -> List[Dict[str, object]]:
+) -> List[Dict[str, Any]]:
     cfg = load_config(config_path)
     start = time.time()
 
     existing_runs = load_runs_csv(runs_csv) if runs_csv else []
-    seen_keys: Set[Tuple[str, str, int]] = {
-        (str(r.get("experiment")), str(r.get("policy")), int(r.get("seed"))) for r in existing_runs
-    }
+    seen_keys: Set[Tuple[str, str, int]] = set()
+    for r in existing_runs:
+        seed_raw = r.get("seed", 0)
+        seed_val = seed_raw if isinstance(seed_raw, (int, float, str)) else 0
+        seen_keys.add((str(r.get("experiment", "")), str(r.get("policy", "")), int(seed_val)))
 
     tasks: List[tuple[ExperimentConfig, RouteSelectionPolicy, int]] = []
     for exp in cfg.experiments:
@@ -97,7 +99,7 @@ def run_experiments(
 
     print(f"[run] queued {len(tasks)} new tasks (existing runs: {len(seen_keys)})")
 
-    new_results: List[Dict[str, object]] = []
+    new_results: List[Dict[str, Any]] = []
     if tasks:
         if use_processes:
             try:
@@ -140,7 +142,7 @@ def run_experiments(
     return results
 
 
-def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> List[Dict[str, float]]:
+def aggregate_by_policy(results: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Aggregate metrics per (experiment, policy), averaging only across seeds.
     """
@@ -174,7 +176,7 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> List[Dict[str, 
             "ground_stations": int(res.get("ground_stations", 0)),
         }
 
-    aggregated_rows: List[Dict[str, float]] = []
+    aggregated_rows: List[Dict[str, Any]] = []
     for key, sums in accum.items():
         n = counts[key]
         info = meta[key]
@@ -193,7 +195,7 @@ def aggregate_by_policy(results: Iterable[Dict[str, object]]) -> List[Dict[str, 
     return aggregated_rows
 
 
-def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict[str, object]:
+def _run_task(exp_dict: Dict[str, Any], policy_value: str, seed: int) -> Dict[str, Any]:
     start_run = time.time()
     exp = ExperimentConfig(
         name=str(exp_dict["name"]),
@@ -208,18 +210,25 @@ def _run_task(exp_dict: Dict[str, object], policy_value: str, seed: int) -> Dict
     return res
 
 
-def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
+def load_runs_csv(path: Path | None) -> List[Dict[str, Any]]:
     if path is None or not path.exists():
         return []
     with path.open() as f:
         reader = csv.DictReader(f)
-        rows: List[Dict[str, object]] = []
-        for row in reader:
+        rows: List[Dict[str, Any]] = []
+        for raw_row in reader:
+            row: Dict[str, Any] = dict(raw_row)
             # Normalize numeric fields so aggregation works on resumed runs.
-            row["seed"] = int(row.get("seed", 0))
+            seed_val = row.get("seed", 0)
+            row["seed"] = int(seed_val if isinstance(seed_val, (int, float, str)) else 0)
+
             for key in ("satellites", "ground_stations", "routers"):
-                if key in row and row[key] != "":
-                    row[key] = int(row[key])
+                val = row.get(key)
+                if val is None or val == "":
+                    continue
+                if isinstance(val, (int, float, str)):
+                    row[key] = int(val)
+
             for key in (
                 "avg_reachable",
                 "min_reachable",
@@ -229,13 +238,16 @@ def load_runs_csv(path: Path | None) -> List[Dict[str, object]]:
                 "avg_dv_entries_updated",
                 "avg_dv_router_ops",
             ):
-                if key in row and row[key] != "":
-                    row[key] = float(row[key])
+                val = row.get(key)
+                if val is None or val == "":
+                    continue
+                if isinstance(val, (int, float, str)):
+                    row[key] = float(val)
             rows.append(row)
         return rows
 
 
-def append_run_row(path: Path, res: Dict[str, object]) -> None:
+def append_run_row(path: Path, res: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists()
     with path.open("a", newline="") as f:
@@ -275,7 +287,7 @@ def append_run_row(path: Path, res: Dict[str, object]) -> None:
         )
 
 
-def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) -> Dict[str, object]:
+def _run_single(exp: ExperimentConfig, policy: RouteSelectionPolicy, seed: int) -> Dict[str, Any]:
     graph, satellites, ground = build_constellation_graph(
         expected_sats=exp.satellites,
         expected_ground=exp.ground_stations,
@@ -350,7 +362,7 @@ def _run_dv_until_stable(graph, routers: Dict[Node, Router], max_rounds: int) ->
             break
 
 
-def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
+def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, Any]:
     reachability_counts: List[int] = []
     examined_counts: List[int] = []
     update_counts: List[int] = []
@@ -379,7 +391,7 @@ def _summarize_routes(routers: Mapping[Node, Router]) -> Dict[str, object]:
     }
 
 
-def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
+def write_results_csv(results: Iterable[Dict[str, Any]], path: Path) -> None:
     """
     Write per-run results to CSV for downstream analysis.
     """
@@ -422,7 +434,7 @@ def write_results_csv(results: Iterable[Dict[str, object]], path: Path) -> None:
             writer.writerow(row)
 
 
-def write_aggregates_csv(aggregated: Iterable[Mapping[str, object]], path: Path) -> None:
+def write_aggregates_csv(aggregated: Iterable[Mapping[str, Any]], path: Path) -> None:
     """
     Write aggregated metrics by policy to CSV.
     """
