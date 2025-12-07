@@ -16,6 +16,7 @@ from algorithms import DijkstraEngine
 from dijkstra_engine import SimpleDijkstraEngine
 from distance_vector_engine import SimpleDistanceVectorEngine
 from nodes import Node
+import time
 from routers import (
     DijkstraRouter,
     GroundStationRouter,
@@ -70,6 +71,7 @@ def load_config(path: Path) -> Config:
 def run_experiments(config_path: Path) -> List[Dict[str, object]]:
     cfg = load_config(config_path)
     results: List[Dict[str, object]] = []
+    start = time.time()
 
     for exp in cfg.experiments:
         for policy_name in cfg.route_selection_policies:
@@ -79,6 +81,8 @@ def run_experiments(config_path: Path) -> List[Dict[str, object]]:
                 print(f"[run] experiment={exp.name} policy={policy.value} seed={seed}")
                 summary = _run_single(exp, policy, seed)
                 results.append(summary)
+    elapsed = time.time() - start
+    print(f"[run] completed {len(results)} runs in {elapsed:.2f}s")
     return results
 
 
