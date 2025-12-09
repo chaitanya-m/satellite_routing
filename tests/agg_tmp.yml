@@ -1,0 +1,11 @@
+
+seed: 0
+seed_count: 2
+route_selection_policies:
+  - DV_ONLY
+experiments:
+  - name: agg_check
+    satellites: 4
+    ground_stations: 1
+    sat_degree: 2
+    ground_links: 1
