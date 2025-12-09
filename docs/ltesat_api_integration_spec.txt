@@ -1,0 +1,897 @@
+ltesat API Integration Technical Specification (Long Form)
+=============================================================
+
+This document is an original technical specification intended to enable a
+large language model (LLM) or human developer to construct a complete software
+API around the `ltesat` tool. It does not reproduce proprietary documentation
+verbatim; instead, it defines abstractions, data models, execution flows, and
+integration patterns that are compatible with typical usage of ltesat as a
+satellite/NTN toolbox and mission-control engine.
+
+The goal is that, given ONLY this document, an LLM should be able to:
+  * Propose a clean, coherent API surface for applications that need to
+    control ltesat programmatically.
+  * Generate configuration files for ltesat.
+  * Invoke ltesat as a process in different modes.
+  * Parse ltesat outputs and map them to strongly-typed structures.
+  * Integrate ltesat into larger systems (NTN simulations, RAN controllers,
+    orchestration tools, etc.).
+
+The document is language-agnostic. When behavior depends on language runtime
+(subprocesses, async I/O, etc.), this is called out explicitly as a
+consideration, but no single language is assumed.
+
+
+1. Conceptual Overview
+----------------------
+
+### 1.1 What ltesat Does
+
+At a high level, ltesat is a satellite-orbit and NTN (Non-Terrestrial Network)
+support tool that can:
+
+  * Represent satellites and constellations (LEO/MEO/GEO, or abstract).
+  * Accept ephemeris input (e.g., via TLE or orbital parameters).
+  * Represent ground cells / ground points of interest.
+  * Compute satellite positions as a function of time.
+  * Compute visibility, passes, and azimuth/elevation from ground points.
+  * Export derived information (e.g., virtual TLEs, time series).
+  * In a "mission-control" style mode, coordinate which satellite should be
+    serving which ground cell and when, so that RAN-side systems (eNB/gNB)
+    can adapt scheduling, beam selection, or handovers.
+
+From the perspective of an external application, ltesat behaves like a
+config-driven engine: you write a configuration file in an extended-JSON
+syntax, invoke the tool with that configuration, and it produces textual or
+structured output (or acts as a mission-control core for a larger system).
+
+The API we design around ltesat must therefore handle three main things:
+
+  1. **Configuration authoring**: building valid configuration files from
+     high-level objects (satellites, constellations, ground cells, scenarios).
+  2. **Process control**: running ltesat with the right arguments, managing
+     lifecycle, error reporting, and logging.
+  3. **Output handling**: collecting, parsing, and representing ltesat outputs
+     (e.g., pass tables, time series, exported ephemeris) as structured data.
+
+
+### 1.2 High-Level Architecture
+
+At a conceptual level, an application using ltesat via this API might look
+like this:
+
+    +-----------------------------------------------------------+
+    |                    Application Layer                      |
+    |  - NTN planning / simulation                              |
+    |  - RAN integration                                        |
+    |  - UI / control dashboards                                |
+    +-------------------------+---------------------------------+
+                              |
+                              v
+    +-------------------------+---------------------------------+
+    |                   ltesat Integration API                  |
+    |                                                           |
+    |  Config Builder   Process Runner    Output Parser         |
+    |  --------------   -------------     ------------          |
+    |  - Models         - CLI wrapper     - Log parsing         |
+    |  - Validation     - PID mgmt        - CSV/JSON parsing    |
+    |  - Serialization  - Timeouts        - Domain mapping      |
+    +-------------------------+---------------------------------+
+                              |
+                              v
+    +-----------------------------------------------------------+
+    |                       ltesat Binary                       |
+    |                (Toolbox / Mission-Control)                |
+    +-----------------------------------------------------------+
+
+The rest of this document defines the abstractions that live in the
+"ltesat Integration API" box.
+
+
+2. Configuration Language Model
+-------------------------------
+
+### 2.1 Extended JSON
+
+ltesat configuration files are written in a JSON-like language with several
+extensions:
+
+  * Property keys can omit quotes if they do not start with a digit.
+  * Duplicate keys are allowed; later definitions merge/override earlier ones.
+  * Objects and arrays can be merged according to specific rules.
+  * A lightweight preprocessor exists (macros, conditional inclusion).
+  * Includes of other configuration files are allowed.
+  * Basic arithmetic / boolean expressions may appear in values in some
+    contexts.
+
+From an API point of view, it is strongly recommended to *not* treat the
+configuration as just raw text. Instead, the API should define a strongly
+typed configuration model that is serialized to this extended JSON.
+
+### 2.2 JSON Merge Semantics (Abstract)
+
+When constructing larger configurations from smaller pieces, ltesat uses
+merge semantics roughly like:
+
+  * **Objects**: merging two objects O1 and O2 results in an object containing
+    all keys from both. For keys in both, the values are recursively merged.
+  * **Arrays**: merging arrays A1 and A2 produces an array whose length is the
+    maximum of the lengths of A1 and A2. At each index i, elements are merged
+    recursively if both exist; if only one exists, it is used.
+
+The integration API should model these semantics in one of two ways:
+
+  * **Explicit merging API** (e.g., `Config.merge(other: Config) -> Config`),
+    OR
+  * **Tree-like model** where each node can be constructed from smaller parts,
+    and the library always serializes a fully-merged configuration (so the
+    user never performs merges manually).
+
+Because merges can be subtle, for LLM use it is recommended to implement
+higher-level composition functions rather than expecting the model to manage
+merge details directly.
+
+
+3. Core Domain Objects
+----------------------
+
+The following conceptual entities should be modeled by the API.
+
+### 3.1 SatelliteEphemeris
+
+Represents how satellite position as a function of time is provided.
+
+**Fields (conceptual):**
+
+  * `source_type` : enum
+      - `"TLE_FILE"` – read from a TLE file.
+      - `"TLE_INLINE"` – TLE lines embedded in config.
+      - `"ORBITAL_PARAMETERS"` – semi-major axis, inclination, eccentricity,
+        etc., specified directly.
+      - `"DEFAULT_ORBIT"` – simple template or family (e.g. generic LEO/MEO).
+  * `tle_filename` : optional string
+      - Path to a TLE file if `source_type == "TLE_FILE"`.
+  * `tle_records` : optional list of string
+      - Raw TLE lines if `source_type == "TLE_INLINE"`.
+  * `orbital_params` : optional object
+      - `semi_major_axis` : float (km)
+      - `eccentricity` : float
+      - `inclination_deg` : float
+      - `raan_deg` : float (right ascension of ascending node)
+      - `arg_perigee_deg` : float
+      - `mean_anomaly_deg` : float
+      - `epoch` : datetime
+  * `default_orbit_profile` : optional enum/string
+      - e.g., `"LEO_600KM"`, `"GEO"`, `"MEO_MEDIUM"`.
+
+The integration API should define a class or struct that captures these, with
+validation methods.
+
+### 3.2 Satellite
+
+Represents a single satellite instance.
+
+**Fields:**
+
+  * `id` : string
+      - Unique identifier within constellation.
+  * `display_name` : string
+      - Human-readable identifier.
+  * `ephemeris` : `SatelliteEphemeris`
+      - How the satellite motion is described.
+  * `metadata` : map<string, string>
+      - Arbitrary key-value annotations (sat type, owner, etc.).
+
+**Responsibilities:**
+
+  * Validate ephemeris sources (must be consistent).
+  * Provide a method to serialize to ltesat configuration node(s).
+  * Optionally provide convenience methods like:
+      - `is_geo()` / `is_leo()` etc. based on orbit parameters.
+
+### 3.3 Constellation
+
+Group of satellites plus high-level structural parameters.
+
+**Fields:**
+
+  * `id` : string
+  * `name` : string
+  * `satellites` : list of `Satellite`
+  * Optional shell-style generator parameters:
+      - `num_planes` : int
+      - `sats_per_plane` : int
+      - `inclination_deg` : float
+      - `altitude_km` : float
+      - `phase_offset_deg` : float or rule
+  * `source_files` : list of TLE filenames (if constellations are loaded from
+    external TLEs).
+
+**Note:** For ltesat, a configuration may define a constellation in a somewhat
+compact way (e.g., shell definitions) or explicitly enumerate satellites.
+The API should allow both patterns, e.g.:
+
+  * `Constellation.from_shell(...)`
+  * `Constellation.from_tle_file(...)`
+  * `Constellation.with_satellites([...])`
+
+
+### 3.4 GroundPosition
+
+Represents a geographic point or cell center on the Earth.
+
+**Fields:**
+
+  * `latitude_deg` : float  (range -90 .. +90)
+  * `longitude_deg` : float (range -180 .. +180)
+  * `altitude_m` : float    (e.g. -1000 .. 20000)
+
+The API should enforce valid ranges at construction or via validation.
+
+### 3.5 GroundCell
+
+Represents a ground cell or footprint area, often associated with a RAN cell.
+
+**Fields:**
+
+  * `id` : string
+      - Unique within config.
+  * `label` : string
+  * `center` : `GroundPosition`
+  * `radius_km` : float
+      - Approximate radius of interest from center.
+  * `supported_constellations` : list<string>
+      - IDs of constellations that may serve this cell.
+  * `metadata` : map<string,string>
+      - RAN cell IDs, tracking area, etc.
+
+These are used by mission-control logic to map satellites to ground cells.
+
+
+### 3.6 TimeSpec
+
+Represents how ltesat should interpret time ranges.
+
+**Fields:**
+
+  * `start_time` : datetime
+      - Start of simulation or computation; may be `None` for "now".
+  * `duration` : timedelta
+      - Total time window to consider.
+  * `step` : timedelta
+      - Sampling interval for trajectories or outputs.
+  * `num_steps` : optional int
+      - Alternative to `duration` if step count is easier to specify.
+  * `time_reference` : enum
+      - `"UTC"`, `"TAI"`, `"SYSTEM_CLOCK"`, etc.
+
+The API should enforce that either `(duration and step)` or `(num_steps and
+step)` are provided, but not an inconsistent mixture.
+
+
+### 3.7 OutputMode and OutputSpec
+
+ltesat can produce several kinds of outputs; the API should make this explicit.
+
+**OutputMode (enum-like):**
+
+  * `AZ_EL` – azimuth/elevation over time for a given ground point and satellite.
+  * `GROUNDTRACK` – sub-satellite point over time.
+  * `ECEF` – Earth-Centered Earth-Fixed coordinates.
+  * `PASSES` – pass windows above some elevation threshold.
+  * `EXPORT` – generation of virtual TLEs or other ephemeris export.
+
+**OutputSpec:**
+
+  * `mode` : OutputMode
+  * `target_sat_id` : optional string
+  * `target_ground_cell_id` : optional string
+  * `min_elevation_deg` : optional float (for passes)
+  * `export_type` : optional string (e.g., `"TLE"`, `"JSON"`)
+  * `output_file` : optional string (output path)
+  * `include_velocity` : optional bool
+  * `include_range` : optional bool
+  * `include_doppler` : optional bool
+
+The integration API should be able to build multiple OutputSpec instances for
+a single ltesat run.
+
+
+### 3.8 MissionControlConfig
+
+Represents the parameters for running ltesat in "mission-control" mode, where
+it assigns satellites to ground cells and possibly updates RAN nodes.
+
+**Fields:**
+
+  * `enabled` : bool
+  * `time_spec` : TimeSpec
+  * `constellations` : list<Constellation>
+  * `ground_cells` : list<GroundCell>
+  * `ran_node_mappings` : list<RanNodeMapping>
+  * `handover_overlap_s` : float
+      - Time overlap for handovers between satellites (seconds).
+  * `log_file` : optional string
+  * `log_options` : optional string (verbosity/rotation)
+
+### 3.9 RanNodeMapping
+
+Connects ltesat ground cells with RAN nodes and their cells.
+
+**Fields:**
+
+  * `ran_node_id` : string
+      - Logical identifier (e.g. gNB ID).
+  * `address` : string
+      - Host/IP and port of RAN node integration point.
+  * `ground_cell_id` : string
+      - GroundCell ID that this RAN node is responsible for.
+  * `ran_cells` : list<string>
+      - IDs of RAN-side cells that are mapped onto this GroundCell.
+  * `metadata` : map<string,string>
+      - Additional binding parameters (e.g. S-NSSAI, RAT type).
+
+The API should treat RanNodeMapping primarily as configuration; interactions
+with the actual RAN nodes are external to ltesat but may be orchestrated by
+mission control mode.
+
+
+4. High-Level Configuration Object
+----------------------------------
+
+All the above pieces are usually combined into a top-level configuration
+structure. We call it `LteSatConfig` here (the name is arbitrary).
+
+### 4.1 LteSatConfig Structure
+
+**Fields:**
+
+  * `constellations` : list<Constellation>
+  * `ground_cells` : list<GroundCell>
+  * `time_spec` : TimeSpec
+  * `outputs` : list<OutputSpec>
+  * `mission_control` : MissionControlConfig
+  * `logging` : LoggingConfig
+  * `includes` : list<string>
+      - External config fragments to include.
+  * `preprocessor_defines` : map<string, string|number|bool>
+      - Variables to define in the config preprocessor.
+
+### 4.2 LoggingConfig
+
+Represents the generic logging options for ltesat.
+
+**Fields:**
+
+  * `log_filename` : string
+  * `log_verbosity` : enum (`ERROR`, `INFO`, `DEBUG`)
+  * `append` : bool
+  * `rotate_size_bytes` : optional int
+  * `rotate_count` : optional int
+  * `time_format` : enum (`SHORT`, `FULL`, `EPOCH`)
+  * `include_microseconds` : bool
+
+The API’s serializer should convert these into the appropriate configuration
+keys.
+
+
+5. ASCII Diagram of the Configuration Model
+-------------------------------------------
+
+Below is a conceptual view of how the configuration entities are related:
+
+    +-------------------+
+    |   LteSatConfig    |
+    +-------------------+
+      |    |      |   |
+      |    |      |   +--> LoggingConfig
+      |    |      |
+      |    |      +------> MissionControlConfig
+      |    |
+      |    +------------> [OutputSpec...]
+      |
+      +----------------> [Constellation...]
+                             |
+                             +--> [Satellite...]
+                                   |
+                                   +--> SatelliteEphemeris
+
+    +--------------------+
+    |   GroundCell...    |
+    +--------------------+
+         |
+         +--> GroundPosition
+
+    +-------------------+
+    | TimeSpec          |
+    +-------------------+
+
+
+6. Serialization to ltesat Configuration
+----------------------------------------
+
+### 6.1 Goals
+
+The API must be able to take a fully-populated `LteSatConfig` object and
+produce an extended-JSON configuration file that ltesat can consume.
+
+Key requirements:
+
+  * The serialization must be deterministic (same config -> same file)
+    for reproducibility.
+  * The serializer must respect merge semantics only if explicitly used;
+    in many cases, it is better to emit a single merged object.
+  * The serializer must be aware of ltesat’s expectations: certain fields
+    are mandatory in some modes and must be emitted; others must be omitted
+    if not applicable.
+
+### 6.2 Strategy
+
+A common design pattern is:
+
+  1. Each domain object implements a `to_config_fragment()` method that
+     returns a JSON-serializable dictionary / map (no text formatting).
+  2. The `LteSatConfig` serializer assembles these fragments into a single
+     dictionary representing the top-level configuration.
+  3. A final "extended JSON" rendering step converts the dictionary into
+     textual syntax:
+       * Keys that are valid identifiers may be written without quotes.
+       * The tool may optionally collapse trailing commas or adapt to
+         ltesat’s accepted syntax.
+       * Preprocessor directives (defines, includes) are emitted as
+         raw lines at the top.
+
+Pseudo-flow (language-agnostic):
+
+    function serialize_ltesat_config(cfg: LteSatConfig): string:
+        root = {}
+
+        root["logging"] = cfg.logging.to_config_fragment()
+        root["time"] = cfg.time_spec.to_config_fragment()
+
+        # Serialize constellations
+        root["constellations"] = [
+            c.to_config_fragment() for c in cfg.constellations
+        ]
+
+        # Serialize ground cells
+        root["ground_cells"] = [
+            g.to_config_fragment() for g in cfg.ground_cells
+        ]
+
+        # Serialize outputs
+        root["outputs"] = [
+            o.to_config_fragment() for o in cfg.outputs
+        ]
+
+        # Serialize mission control (if enabled)
+        if cfg.mission_control.enabled:
+            root["mission_control"] = cfg.mission_control.to_config_fragment()
+
+        # At this stage, root is a pure data structure.
+        return render_extended_json(root, cfg.preprocessor_defines, cfg.includes)
+
+Here `render_extended_json` is responsible for:
+
+  * Prepending lines such as `#define VAR 123`.
+  * Emitting `include "file.cfg",` lines.
+  * Serializing the JSON structure with or without key quotes.
+
+
+### 6.3 Preprocessor Handling
+
+The API may choose to hide the preprocessor from the user entirely, except
+for advanced scenarios. Recommended approach:
+
+  * Provide helper functions such as:
+      - `cfg.define("USE_NTN_MODEL", true)`
+      - `cfg.include_file("common_constellation.cfg")`
+  * The implementation decides whether to use the preprocessor or simply
+    inline content before serialization. For simple use-cases, inlining is
+    easier and less error-prone.
+
+
+7. Process Execution Model
+--------------------------
+
+### 7.1 Basic Invocation Patterns
+
+ltesat is typically executed on the command line as:
+
+  * Toolbox mode:
+        ltesat <config_file>
+
+  * Mission-control mode:
+        ltesat -m <config_file>
+
+The API should provide a high-level abstraction for this, such as:
+
+  * `run_toolbox(config: LteSatConfig) -> LteSatResult`
+  * `run_mission_control(config: LteSatConfig) -> MissionControlHandle`
+
+Under the hood, both functions will:
+
+  * Serialize `config` to a temporary config file (or a known path).
+  * Spawn a subprocess executing the ltesat binary with the right arguments.
+  * Collect stdout, stderr, and exit code.
+  * Parse outputs into `LteSatResult` or wrap the running process in a
+    `MissionControlHandle` for long-lived modes.
+
+### 7.2 Subprocess Considerations
+
+Because languages differ in how they handle subprocesses, the specification
+must be general:
+
+  * **Blocking vs async:**  
+    In some ecosystems, synchronous/blocking subprocess invocation is standard
+    (e.g., typical Python usage). In others (Node.js), async is the default.
+    The API should be designed so that the blocking / async choice is an
+    implementation detail, not a semantic one. For example, the abstract API
+    could define:
+        - `run_toolbox` (blocking)
+        - `run_toolbox_async` (optional async, or promise-based)
+
+  * **Streams:**  
+    The API should capture:
+      - `stdout` text
+      - `stderr` text
+      - exit status / error code
+      - path to any output files generated by ltesat (from configuration).
+
+  * **Timeouts:**  
+    Provide an optional `timeout` parameter to avoid runaway processes.
+
+  * **Binary location:**  
+    The API layer should either:
+      - Accept an explicit path to ltesat binary, or
+      - Use environment variables or search PATH.
+
+### 7.3 Result Object
+
+Define a generic `LteSatProcessResult`:
+
+  * `exit_code` : int
+  * `stdout` : string
+  * `stderr` : string
+  * `output_files` : list<string>
+      - Paths to files that ltesat created or updated.
+  * `parsed_outputs` : list<ParsedOutput>
+      - Optionally parsed from stdout or output files (see next section).
+
+
+8. Output Parsing and Representation
+------------------------------------
+
+ltesat can produce several categories of outputs. The exact formats are
+implementation-dependent, but typically include structured text or simple
+formats (CSV, pseudo-JSON, etc.).
+
+The integration API should define a hierarchy of parsed outputs.
+
+
+### 8.1 ParsedOutput Base
+
+All parsed outputs should derive from a conceptual base type:
+
+  * `kind` : enum (`TRAJECTORY`, `PASS_TABLE`, `AZ_EL_SERIES`, `ECEF_SERIES`,
+    `TLE_EXPORT`, `MISSION_EVENT_LOG`, etc.)
+  * `source_file` : optional string
+  * `metadata` : map<string,string>
+  * `raw_content` : string
+
+
+### 8.2 TimeSeriesSample
+
+Used for any time-stamped numerical series.
+
+Fields:
+
+  * `timestamp` : datetime
+  * `latitude_deg` : optional float
+  * `longitude_deg` : optional float
+  * `altitude_m` : optional float
+  * `azimuth_deg` : optional float
+  * `elevation_deg` : optional float
+  * `range_km` : optional float
+  * `doppler_hz` : optional float
+  * `x_ecef_m` : optional float
+  * `y_ecef_m` : optional float
+  * `z_ecef_m` : optional float
+
+### 8.3 TrajectorySeries (GROUNDTRACK / ECEF)
+
+Represents the trajectory of a satellite.
+
+Fields:
+
+  * `satellite_id` : string
+  * `samples` : list<TimeSeriesSample>
+  * `coordinate_system` : enum (`GROUNDTRACK`, `ECEF`)
+
+### 8.4 AzElSeries
+
+Represents azimuth/elevation evolution of a satellite from a given ground
+position.
+
+Fields:
+
+  * `satellite_id` : string
+  * `ground_cell_id` : string
+  * `samples` : list<TimeSeriesSample>
+      - With `azimuth_deg` and `elevation_deg` populated.
+
+### 8.5 PassTable
+
+Represents discrete pass windows above a certain elevation.
+
+Fields per pass:
+
+  * `satellite_id` : string
+  * `ground_cell_id` : string
+  * `start_time` : datetime
+  * `end_time` : datetime
+  * `max_elevation_deg` : float
+  * `max_elevation_time` : datetime
+  * `duration_s` : float
+
+The `PassTable` object contains a list of these records.
+
+
+### 8.6 TleExport
+
+Represents TLE-like output from ltesat.
+
+Fields:
+
+  * `satellite_id` : string
+  * `tle_line_1` : string
+  * `tle_line_2` : string
+
+
+### 8.7 Parsing Strategy
+
+Because ltesat’s output formats may vary or be configurable, the integration
+API should:
+
+  * Provide pluggable parsers for each output kind.
+  * Allow the application to either:
+      - Use high-level parse functions (e.g., `parse_pass_table(output)`), or
+      - Access `raw_content` directly and bypass parsing.
+
+Pseudo-interface:
+
+    interface OutputParser:
+        can_parse(output: LteSatProcessResult) -> bool
+        parse(output: LteSatProcessResult) -> list<ParsedOutput>
+
+The main runner would maintain an ordered list of `OutputParser`s and
+apply them to `stdout` and any known output files.
+
+
+9. Mission Control Runtime Model
+--------------------------------
+
+In mission-control mode, ltesat may run as a long-lived process that:
+
+  * Tracks current and future satellite coverage of ground cells.
+  * Decides which satellite should currently serve each cell.
+  * Optionally interacts with external systems (RAN nodes, orchestrators)
+    to drive handovers or configuration changes.
+
+### 9.1 MissionControlHandle
+
+The integration API should define an abstraction that wraps this long-lived
+process:
+
+Fields / properties:
+
+  * `process` : underlying process handle
+  * `config` : MissionControlConfig
+  * `state` : enum (`STARTING`, `RUNNING`, `STOPPED`, `ERROR`)
+  * `log_stream` : optional stream of logs (if stdout/stderr streaming is used)
+  * `metrics` : optional structured information (if ltesat exposes such).
+
+Methods:
+
+  * `stop(graceful: bool)`
+  * `is_running() -> bool`
+  * `get_recent_logs(n: int) -> list<string>`
+  * `get_status() -> MissionControlStatus`
+
+### 9.2 MissionControlStatus
+
+Fields:
+
+  * `timestamp` : datetime
+  * `active_satellite_by_cell` : map<string, string>
+      - Key: ground cell ID
+      - Value: satellite ID currently assigned.
+  * `next_handover_events` : list<UpcomingHandover>
+  * `errors` : list<string>
+
+### 9.3 UpcomingHandover
+
+Fields:
+
+  * `ground_cell_id` : string
+  * `current_sat_id` : string
+  * `next_sat_id` : string
+  * `handover_time` : datetime
+  * `overlap_s` : float
+
+The API may build this status from either text output, telemetry channels, or
+log parsing, depending on how ltesat is configured.
+
+
+10. Error Handling
+------------------
+
+### 10.1 Categories of Errors
+
+The API should distinguish between:
+
+  * **Configuration errors** – invalid or incomplete config before ltesat is
+    run (e.g., missing mandatory fields, inconsistent ranges).
+  * **Serialization errors** – failure to convert config into textual form.
+  * **Execution errors** – ltesat process fails to start or exits with a
+    non-zero code.
+  * **Parsing errors** – failure to interpret ltesat output.
+
+### 10.2 Abstract Error Types
+
+The following abstract error types are recommended:
+
+  * `ConfigValidationError`
+  * `SerializationError`
+  * `LteSatExecutionError`
+  * `OutputParsingError`
+
+These can be mapped to exceptions, error codes, or result types depending on
+language.
+
+
+11. ASCII Flow of a Typical Toolbox Run
+---------------------------------------
+
+Below is a typical sequence for using ltesat in toolbox mode from an
+application via this API:
+
+    +---------------------------+
+    |   Application / Caller    |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Build LteSatConfig       |
+    |  - constellations         |
+    |  - ground cells           |
+    |  - time spec              |
+    |  - outputs                |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Validate Config          |
+    |  (ConfigValidationError?) |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Serialize -> config.cfg  |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Run ltesat config.cfg    |
+    |  (subprocess)             |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Collect stdout/stderr    |
+    |  and exit code            |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Parse Outputs            |
+    |  (PassTable, etc.)        |
+    +---------------------------+
+               |
+               v
+    +---------------------------+
+    |  Return Structured Result |
+    +---------------------------+
+
+
+12. Testing & Validation Considerations
+---------------------------------------
+
+To make the API suitable for use by an LLM, it should be designed to be
+self-validating as much as possible.
+
+### 12.1 Config-Level Validation
+
+For each domain object, implement:
+
+  * `validate()` – returns a list of issues or raises a validation error.
+
+Examples:
+
+  * Check that `latitude` is in [-90,90].
+  * Check that `sats_per_plane >= 1` when using a shell constellation.
+  * Check that `start_time < end_time` in TimeSpec.
+  * Check that at least one `OutputSpec` is defined.
+
+### 12.2 Round-Trip Tests
+
+Encourage usage patterns where:
+
+  * A config is created in memory.
+  * It is serialized to text.
+  * The text is then parsed back into a config object.
+  * The result is compared to the original.
+
+LLMs can be guided to write these tests so that they can verify their own
+API design.
+
+
+13. Security and Safety Notes (High Level)
+------------------------------------------
+
+Because ltesat uses config files and may run external code paths, API designs
+should consider:
+
+  * **Path handling:** Avoid arbitrary path injection when building includes
+    or output paths.
+  * **Command injection:** Do not prepend or append user-controlled text to
+    the ltesat command line without sanitization.
+  * **File permissions:** Logs and output data may contain operational
+    information; ensure permissions are set appropriately.
+  * **Network exposure:** If mission-control mode interacts with RAN nodes or
+    other systems, ensure that any IPs/ports are validated.
+
+
+14. Extensibility Hooks
+-----------------------
+
+The API should be extensible in at least the following ways:
+
+  * New `OutputMode`s or `ParsedOutput` types can be added as ltesat evolves.
+  * New ephemeris sources can be modeled by extending `SatelliteEphemeris`.
+  * Additional mission-control status information can be exposed without
+    breaking existing consumers.
+
+A good internal design is to use:
+
+  * Enumerations that can accept "unknown" or "custom" values gracefully.
+  * Versioned configuration schemas, or at least a field for versioning.
+
+
+15. Summary
+-----------
+
+This specification defined:
+
+  * A set of domain models (satellites, constellations, ground cells, time
+    windows, mission control parameters).
+  * A top-level configuration object `LteSatConfig`.
+  * A serialization strategy from these models to ltesat’s configuration
+    format.
+  * A process execution model for invoking ltesat in toolbox and mission-
+    control modes.
+  * Structured representations for ltesat outputs (time series, pass tables,
+    az/el, ECEF, exported TLEs).
+  * Error handling, testing, and extensibility considerations.
+  * ASCII diagrams of configuration relationships and execution flow.
+
+Given this document, a large language model (or human developer) should be
+able to design and implement a concrete API in any language (Python, Rust,
+C++, Java, TypeScript, etc.) that:
+
+  * Builds valid configurations for ltesat.
+  * Executes the ltesat binary correctly.
+  * Parses results into strongly typed structures.
+  * Integrates those results into a larger NTN or satellite-aware application.
+
+End of document.

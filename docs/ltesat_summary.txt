@@ -1,0 +1,180 @@
+Compressed Technical Summary for ltesat, LTE UE, and LTE Web Interface
+(Generated for API Design and Simulator Integration)
+
+1. ltesat Overview
+------------------
+Purpose: Companion software to Amarisoft eNB/gNB for NTN (Non-Terrestrial Network) scenarios.
+
+Modes:
+- Toolbox mode: Offline satellite orbit simulation, replay, planning, TLE import/export, pass prediction.
+- Mission control mode: Real-time selection of serving satellites for NTN-enabled RAN nodes.
+
+Key Concepts:
+- Satellite ephemeris (TLE or manual orbital parameters)
+- Ground cell descriptors
+- Constellation definitions (shell, arrays, multiple-TLE bundles)
+- Real-time RAN-to-cell mapping and handover control for LEO constellations
+
+2. Requirements
+---------------
+Hardware: Minimal; any machine.
+Software: 64‑bit Linux; GLIBC ≥ 2.17.
+
+3. Installation
+---------------
+- Extract and run directly.
+- License with NTN option required.
+- Example commands:
+  - Groundtrack: ./ltesat sat-groundtrack.cfg
+  - Mission control: ./ltesat -m sat-mc.cfg
+
+4. Configuration Syntax
+-----------------------
+JSON-like with extensions:
+- Basic types + complex numbers + operators
+- Duplicate properties merged (last wins)
+- Includes via: include "file.cfg",
+- Preprocessor: #define, #undef, #if, #include, etc.
+- Backquote strings with ${expr}
+
+JSON Merge Rules:
+- Objects merged recursively.
+- Arrays extended to max length; per-index merge.
+
+5. Global Properties
+--------------------
+constellation_list:
+- Shell: n_planes, n_sats_per_plane, inclination, altitude
+- Array of satellites
+- multiple_tle_filename
+
+output_mode: az_el | groundtrack | ecef | pass  
+output_list: Single point vs trajectory  
+sat_id: Which satellite to output  
+step_ms: Step size  
+n_steps: Count or number of passes  
+start_time: UTC ISO 8601  
+min_elevation: Filtering for passes
+
+Ground Cells:
+- latitude, longitude, altitude
+- radius (mission control)
+- supported_constellations
+
+Export:
+- export_type: json | tle  
+- export_filename, export_time
+
+6. Satellite Descriptor Object
+------------------------------
+Sources:
+- tle_filename
+- default_ephemeris: geo | meo | leo
+  - default_altitude
+  - default_elevation_offset
+- ephemeris object:
+  - eccentricity, inclination, semi_major_axis
+  - longitude of ascending node
+  - periapsis, anomaly
+  - epoch (UTC)
+
+7. Ground Cell Descriptor
+-------------------------
+Used for az/el computations and mission control cell footprint.
+- ground_position:{lat, lon, alt}
+- radius
+- supported_constellations
+
+8. Mission Control Parameters
+------------------------------
+ran_node_list:
+- addr
+- label
+- mapping_list:
+  - ground_cell_id
+  - ran_cell_list
+
+pass_overlap: Seconds of overlap between satellites  
+dump_ran_status: Console output  
+log_filename, log_options, log_sync  
+com_addr: WebSocket API endpoint for GUI  
+
+9. Examples
+-----------
+- Overhead pass prediction with ISS TLE
+- Trajectory sampling with Doppler
+- Virtual TLE export using default_ephemeris
+
+----------------------------------------------
+LTE WWW Interface Overview
+----------------------------------------------
+
+1. Purpose
+----------
+HTML5 GUI for:
+- Log viewing (file or real‑time WebSocket)
+- PHY stats visualization
+- Resource block diagrams
+- Constellation & channel response displays
+- UE scenario generation/execution
+
+2. Features
+-----------
+- Log parsing, filtering, navigation
+- Real-time logs via WebSocket
+- Charts for PHY stats
+- RB allocation graphics
+- Channel response + QAM constellation from PHY logs
+- ZIP support, per-cell analytics
+- Wireshark integration
+- UE simulation scenario builder
+
+3. Requirements
+---------------
+Web server mode: Apache + browser  
+Standalone: Node WebKit  
+Wireshark optional
+
+4. Installation
+---------------
+- Deploy files to HTTP server
+- Linux standalone: install nodejs, npm, nw
+
+5. Managing Clients
+-------------------
+Client types:
+- Log files
+- WebSocket connections to Amarisoft components
+- URL-based log retrieval
+- Server-side file store
+
+Client actions:
+- Enable/disable
+- Reconnect
+- Clear logs
+- Display RB allocation
+- Configure log levels (filters, max size, per-layer settings)
+
+6. Log Display System
+---------------------
+Columns:
+- Time, Diff, Layer origin, ID (RNTI), Info, IMSI/IMEI, Message
+
+Navigation:
+- Prev/next by layer
+- Search
+- Detailed info panel for logs with extra content
+
+PHY Displays:
+- Physical layer analytics charts
+- RB allocation visualization (zoom, pan)
+- QAM constellation + channel response
+
+Misc:
+- Time origin adjustment
+- Pause live updates
+
+Change history includes multiple enhancements to UE scenarios, log system, analytics, and IPv6 support.
+
+----------------------------------------------
+(End of Compressed Technical Summary)

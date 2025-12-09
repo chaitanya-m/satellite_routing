@@ -1,0 +1,473 @@
+Satellite/NTN Engine IDL (Language-Agnostic)
+==========================================
+
+This IDL-like specification defines the domain data types and interfaces
+(ports) required for plug-and-play satellite/NTN simulation engines, with
+`ltesat` as one possible backend. It is intentionally language-agnostic and
+can be translated into interfaces / classes / structs in any target language.
+
+1. Basic Scalar Types
+---------------------
+
+Use the following conceptual scalar types:
+
+  * string
+  * bool
+  * int
+  * float           # double precision recommended
+  * datetime        # timezone-aware, preferably UTC
+  * duration        # time interval (seconds or structured)
+  * map<K, V>       # dictionary / associative array
+  * list<T>         # ordered sequence
+
+
+2. Enumerations
+---------------
+
+enum CoordinateSystem {
+    GROUNDTRACK,
+    ECEF
+}
+
+enum EngineKind {
+    "ltesat",
+    "mock",
+    "cloud-ntn",
+    "other"         # allow arbitrary extension
+}
+
+enum TimeReference {
+    UTC,
+    SYSTEM_CLOCK
+}
+
+enum SatelliteEngineErrorKind {
+    CONFIG_VALIDATION,
+    ENGINE_EXECUTION,
+    OUTPUT_PARSING
+}
+
+
+3. Core Domain Value Types
+--------------------------
+
+### 3.1 GroundPosition
+
+struct GroundPosition {
+    latitude_deg: float    # range [-90, 90]
+    longitude_deg: float   # range [-180, 180]
+    altitude_m: float      # arbitrary range, e.g. [-1000, 20000]
+}
+
+
+### 3.2 GroundCell
+
+struct GroundCell {
+    id: string
+    label: string
+    center: GroundPosition
+    radius_km: float
+    supported_constellations: list<string>
+    metadata: map<string, string>
+}
+
+
+### 3.3 SatelliteEphemeris
+
+enum SatelliteEphemerisSourceType {
+    TLE_FILE,
+    TLE_INLINE,
+    ORBITAL_PARAMETERS,
+    DEFAULT_ORBIT_PROFILE
+}
+
+struct OrbitalParameters {
+    semi_major_axis_km: float
+    eccentricity: float
+    inclination_deg: float
+    raan_deg: float              # right ascension of ascending node
+    arg_perigee_deg: float
+    mean_anomaly_deg: float
+    epoch: datetime
+}
+
+struct SatelliteEphemeris {
+    source_type: SatelliteEphemerisSourceType
+
+    # When source_type == TLE_FILE
+    tle_filename: string?
+
+    # When source_type == TLE_INLINE
+    tle_records: list<string>?    # raw TLE lines
+
+    # When source_type == ORBITAL_PARAMETERS
+    orbital_params: OrbitalParameters?
+
+    # When source_type == DEFAULT_ORBIT_PROFILE
+    default_orbit_profile: string?   # e.g. "LEO_600KM", "GEO"
+}
+
+
+### 3.4 Satellite
+
+struct Satellite {
+    id: string
+    display_name: string
+    ephemeris: SatelliteEphemeris
+    metadata: map<string, string>
+}
+
+
+### 3.5 Constellation
+
+struct Constellation {
+    id: string
+    name: string
+    satellites: list<Satellite>
+
+    # Optional shell-style generator parameters
+    num_planes: int?
+    sats_per_plane: int?
+    inclination_deg: float?
+    altitude_km: float?
+    phase_offset_deg: float?
+
+    source_files: list<string>?
+}
+
+
+### 3.6 TimeSpec
+
+struct TimeSpec {
+    start_time: datetime         # may represent simulation or absolute time
+    duration: duration?          # optional; must not conflict with num_steps
+    step: duration               # sampling step
+    num_steps: int?              # alternative to duration
+    time_reference: TimeReference
+}
+
+
+4. Output-Oriented Value Types
+------------------------------
+
+### 4.1 TimeSeriesSample
+
+struct TimeSeriesSample {
+    timestamp: datetime
+
+    # Optional fields depending on coordinate system / computation type
+    latitude_deg: float?
+    longitude_deg: float?
+    altitude_m: float?
+
+    x_ecef_m: float?
+    y_ecef_m: float?
+    z_ecef_m: float?
+
+    azimuth_deg: float?
+    elevation_deg: float?
+
+    range_km: float?
+    doppler_hz: float?
+}
+
+
+### 4.2 TrajectoryRequest / TrajectoryResult
+
+struct TrajectoryRequest {
+    satellite: Satellite
+    time_window: TimeSpec
+    coordinate_system: CoordinateSystem
+    include_velocity: bool
+    include_range: bool
+    include_doppler: bool
+}
+
+struct TrajectoryResult {
+    satellite_id: string
+    coordinate_system: CoordinateSystem
+    samples: list<TimeSeriesSample>
+    engine_metadata: map<string, string>
+}
+
+
+### 4.3 AzElRequest / AzElResult
+
+struct AzElRequest {
+    satellite: Satellite
+    ground_cell: GroundCell
+    time_window: TimeSpec
+}
+
+struct AzElResult {
+    satellite_id: string
+    ground_cell_id: string
+    samples: list<TimeSeriesSample>   # azimuth_deg, elevation_deg filled
+    engine_metadata: map<string, string>
+}
+
+
+### 4.4 PassRequest / PassRecord / PassResult
+
+struct PassRequest {
+    constellation: Constellation
+    ground_cells: list<GroundCell>
+    time_window: TimeSpec
+    min_elevation_deg: float
+}
+
+struct PassRecord {
+    satellite_id: string
+    ground_cell_id: string
+    start_time: datetime
+    end_time: datetime
+    max_elevation_deg: float
+    max_elevation_time: datetime
+    duration_s: float
+}
+
+struct PassResult {
+    passes: list<PassRecord>
+    engine_metadata: map<string, string>
+}
+
+
+### 4.5 EphemerisExportRequest / EphemerisExportResult
+
+struct EphemerisExportRequest {
+    satellite: Satellite
+    time_window: TimeSpec
+    export_format: string          # e.g. "TLE", "JSON"
+}
+
+struct EphemerisRecord {
+    satellite_id: string
+    format: string                 # "TLE", "JSON", etc.
+    content: string                # raw exported text
+}
+
+struct EphemerisExportResult {
+    records: list<EphemerisRecord>
+    engine_metadata: map<string, string>
+}
+
+
+5. Mission Control Types
+------------------------
+
+### 5.1 RanNodeMapping
+
+struct RanNodeMapping {
+    ran_node_id: string
+    address: string                    # host/ip:port or similar
+    ground_cell_id: string
+    ran_cells: list<string>
+    metadata: map<string, string>
+}
+
+
+### 5.2 MissionControlPlan
+
+struct MissionControlPlan {
+    constellations: list<Constellation>
+    ground_cells: list<GroundCell>
+    ran_mappings: list<RanNodeMapping>
+    time_window: TimeSpec
+    handover_overlap_s: float
+    logging: LoggingConfig
+}
+
+
+### 5.3 MissionControlStatus and UpcomingHandover
+
+struct UpcomingHandover {
+    ground_cell_id: string
+    current_sat_id: string
+    next_sat_id: string
+    handover_time: datetime
+    overlap_s: float
+}
+
+struct MissionControlStatus {
+    timestamp: datetime
+    active_satellite_by_cell: map<string, string>  # cell_id -> sat_id
+    upcoming_handovers: list<UpcomingHandover>
+    errors: list<string>
+}
+
+
+### 5.4 MissionControlPlanResult
+
+struct GroundCellAssignment {
+    ground_cell_id: string
+    satellite_id: string
+    start_time: datetime
+    end_time: datetime
+}
+
+struct MissionControlPlanResult {
+    assignments: list<GroundCellAssignment>
+    engine_metadata: map<string, string>
+}
+
+
+6. Logging and Capabilities
+---------------------------
+
+### 6.1 LoggingConfig
+
+struct LoggingConfig {
+    log_filename: string
+    log_verbosity: string          # e.g. "ERROR", "INFO", "DEBUG"
+    append: bool
+    rotate_size_bytes: int?
+    rotate_count: int?
+    time_format: string?           # e.g. "SHORT", "FULL", "EPOCH"
+    include_microseconds: bool
+}
+
+
+### 6.2 EngineCapabilities
+
+struct EngineCapabilities {
+    name: string
+    version: string
+
+    supports_passes: bool
+    supports_trajectory: bool
+    supports_az_el: bool
+    supports_ephemeris_export: bool
+    supports_mission_control: bool
+
+    max_constellation_size: int?
+    notes: map<string, string>
+    extensions: map<string, string>   # backend-specific capability flags
+}
+
+
+7. Error Types
+--------------
+
+abstract struct SatelliteEngineError {
+    kind: SatelliteEngineErrorKind
+    message: string
+    backend_name: string
+}
+
+struct ConfigValidationError extends SatelliteEngineError {
+    validation_issues: list<string>
+}
+
+struct EngineExecutionError extends SatelliteEngineError {
+    exit_code: int?
+    raw_stderr_excerpt: string?
+}
+
+struct OutputParsingError extends SatelliteEngineError {
+    raw_output_excerpt: string
+}
+
+
+8. Backend Configuration Abstractions
+-------------------------------------
+
+interface EngineBackendConfig {}
+
+# Example: ltesat-specific backend config
+struct LteSatBackendConfig implements EngineBackendConfig {
+    binary_path: string
+    working_directory: string
+    temp_config_dir: string
+    log_dir: string
+    default_timeout_s: float
+    env: map<string, string>
+    extra_cli_flags: list<string>
+}
+
+
+9. Engine Ports (Interfaces)
+----------------------------
+
+### 9.1 SatelliteEngine (toolbox functions)
+
+interface SatelliteEngine {
+
+    # Returns capabilities of this engine.
+    get_capabilities() -> EngineCapabilities
+
+    # Computes passes above a minimum elevation for given constellation
+    # and ground cells over a time window.
+    compute_passes(req: PassRequest) -> PassResult
+        throws SatelliteEngineError
+
+    # Computes trajectory of a single satellite in given coordinate system.
+    compute_trajectory(req: TrajectoryRequest) -> TrajectoryResult
+        throws SatelliteEngineError
+
+    # Computes azimuth/elevation series for a satellite as seen from a
+    # ground cell.
+    compute_az_el(req: AzElRequest) -> AzElResult
+        throws SatelliteEngineError
+
+    # Exports satellite ephemeris in desired format (e.g., TLE).
+    export_ephemeris(req: EphemerisExportRequest) -> EphemerisExportResult
+        throws SatelliteEngineError
+}
+
+
+### 9.2 MissionControlEngine (long-lived mission control)
+
+interface MissionControlEngine {
+
+    # Start a long-lived mission control session. Returns a handle used
+    # to query status and stop the session.
+    start_session(plan: MissionControlPlan) -> MissionControlSession
+        throws SatelliteEngineError
+
+    # Plan assignments statically (without a running session).
+    plan_assignments(plan: MissionControlPlan) -> MissionControlPlanResult
+        throws SatelliteEngineError
+}
+
+
+### 9.3 MissionControlSession
+
+interface MissionControlSession {
+
+    # Returns current status: active satellite per ground cell, upcoming
+    # handovers, and errors if any.
+    get_status() -> MissionControlStatus
+        throws SatelliteEngineError
+
+    # Indicates whether the underlying engine/session is still running.
+    is_running() -> bool
+
+    # Requests termination of the underlying session; may be graceful or
+    # immediate depending on implementation.
+    stop(graceful: bool) -> void
+        throws SatelliteEngineError
+
+    # Returns a list of recent log lines, for monitoring or debugging.
+    get_recent_logs(n: int) -> list<string>
+        throws SatelliteEngineError
+}
+
+
+10. Engine Factory / Registry
+-----------------------------
+
+interface SatelliteEngineFactory {
+
+    # Create a SatelliteEngine for a given kind and backend-specific config.
+    create_engine(kind: EngineKind, backend_config: EngineBackendConfig)
+        -> SatelliteEngine
+        throws SatelliteEngineError
+
+    # Create a MissionControlEngine for a given kind and backend-specific config.
+    # May return null/None if the selected engine does not support mission control.
+    create_mission_control(kind: EngineKind, backend_config: EngineBackendConfig)
+        -> MissionControlEngine?
+        throws SatelliteEngineError
+}
+
+# End of IDL

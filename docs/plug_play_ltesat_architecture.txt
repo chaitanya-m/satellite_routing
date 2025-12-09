@@ -1,0 +1,382 @@
+Plug-and-Play Satellite Simulation Architecture
+=============================================
+
+This document describes how to design a plug-and-play architecture for
+satellite / NTN simulation, where `ltesat` is only one possible backend among
+others. The goal is to ensure that application code never depends directly on
+`ltesat` itself, but only on stable, domain-level interfaces, so that other
+engines (cloud APIs, libraries, mocks) can be swapped in transparently.
+
+1. Goal
+-------
+
+Allow an application to use satellite/NTN capabilities such as:
+
+  * Computing passes (visibility windows) between satellites and ground cells.
+  * Computing trajectories (groundtrack or ECEF).
+  * Computing azimuth/elevation time series.
+  * Exporting ephemeris (e.g. TLEs).
+  * Running a mission-control style process that assigns satellites to ground
+    cells over time and orchestrates handovers.
+
+while treating `ltesat` as *one* backend implementation among many.
+
+We achieve this with a ports-and-adapters design:
+
+  * **Ports**: stable interfaces (SatelliteEngine, MissionControlEngine).
+  * **Adapters**: specific implementations (LteSatEngineAdapter,
+    CloudNtnEngineAdapter, MockEngineAdapter, etc.).
+
+
+2. Ports and Adapters Overview
+------------------------------
+
+Conceptually, we separate domain logic (what we want to do) from backend
+details (how we do it):
+
+    +---------------------------+
+    |   Application / Domain    |
+    |                           |
+    |  uses ONLY these ports:   |
+    |    - SatelliteEngine      |
+    |    - MissionControlEngine |
+    +-------------+-------------+
+                  |
+          (ports / interfaces)
+                  |
+    +-------------+-------------+
+    |         Adapters          |
+    |  LteSatEngineAdapter      |
+    |  SomeOtherEngineAdapter   |
+    |  MockEngineAdapter        |
+    +------+------+-------------+
+           |      |
+           v      v
+       ltesat   other backend
+
+The application talks only to the **ports**:
+
+  * SatelliteEngine
+  * MissionControlEngine
+
+Each backend provides an **adapter** implementing these ports:
+
+  * LteSatEngineAdapter
+  * LteSatMissionControlAdapter
+  * CloudNtnEngineAdapter
+  * MockEngineAdapter
+  * etc.
+
+
+3. Core Domain Interfaces (Ports)
+---------------------------------
+
+We assume domain data types already exist for:
+
+  * Satellite, Constellation
+  * GroundCell, GroundPosition
+  * TimeSpec (time window, step, etc.)
+  * MissionControlPlan, MissionControlStatus
+  * PassRequest, PassResult
+  * TrajectoryRequest, TrajectoryResult
+  * AzElRequest, AzElResult
+  * EphemerisExportRequest, EphemerisExportResult
+
+### 3.1 SatelliteEngine
+
+A port for toolbox-style operations: passes, trajectories, az/el, exports.
+
+  * compute_passes(req: PassRequest) -> PassResult
+  * compute_trajectory(req: TrajectoryRequest) -> TrajectoryResult
+  * compute_az_el(req: AzElRequest) -> AzElResult
+  * export_ephemeris(req: EphemerisExportRequest) -> EphemerisExportResult
+  * get_capabilities() -> EngineCapabilities
+
+The key property: the interface is purely domain-level. No mentions of:
+
+  * configuration files
+  * command-line arguments
+  * process IDs
+  * ltesat-specific flags or options
+
+### 3.2 MissionControlEngine
+
+Mission control might be long-lived, so it gets its own port.
+
+  * start_session(cfg: MissionControlPlan) -> MissionControlSession
+  * plan_assignments(cfg: MissionControlPlan) -> MissionControlPlanResult
+
+`start_session` runs a long-lived mission control process, returning a
+MissionControlSession handle.
+
+`plan_assignments` is a convenience for computing a full assignment plan
+over a time window without running a live process.
+
+### 3.3 MissionControlSession
+
+Represents a running mission-control instance.
+
+  * get_status() -> MissionControlStatus
+  * stop(graceful: bool)
+  * is_running() -> bool
+  * get_recent_logs(n: int) -> [string]
+
+
+4. Capability Negotiation
+-------------------------
+
+Not all backends support all features. For example:
+
+  * A minimal engine might support passes and trajectories, but no mission
+    control.
+  * Another engine might support mission control but not ephemeris export.
+
+We introduce a generic `EngineCapabilities` domain type:
+
+  * name: string              # "ltesat", "mock", "cloud-ntn"
+  * version: string
+  * supports_passes: bool
+  * supports_trajectory: bool
+  * supports_az_el: bool
+  * supports_ephemeris_export: bool
+  * supports_mission_control: bool
+  * max_constellation_size: int?
+  * notes: map<string, string>
+
+`SatelliteEngine.get_capabilities()` returns this.
+
+Application code can probe capabilities and choose strategies accordingly.
+
+
+5. Backend-Specific Configuration
+---------------------------------
+
+Backend implementations need configuration that does *not* belong in the
+domain interfaces. For example, `ltesat` needs:
+
+  * Path to binary.
+  * Working directory.
+  * Directory for temporary config files.
+  * Logging directory.
+  * Default timeout.
+  * Environment variables.
+  * Extra CLI flags.
+
+We separate these into backend config types, not part of the ports.
+
+Example: LteSatBackendConfig
+
+  * binary_path: string
+  * working_directory: string
+  * temp_config_dir: string
+  * log_dir: string
+  * default_timeout_s: float
+  * env: map<string, string>
+  * extra_cli_flags: [string]
+
+Only the adapter constructor depends on this type. The ports remain oblivious
+to it, ensuring plug-and-play behavior.
+
+
+6. How the ltesat Adapter Implements the Ports
+----------------------------------------------
+
+### 6.1 LteSatEngineAdapter
+
+`LteSatEngineAdapter` implements `SatelliteEngine`.
+
+Example behavior for `compute_passes`:
+
+1. Map `PassRequest` to an internal `LteSatConfig` object (not exposed via
+   the port).
+2. Serialize `LteSatConfig` to a temporary config file (`config_path`).
+3. Build the CLI arguments for ltesat in toolbox mode:
+       [binary_path, config_path]
+4. Run the process with a timeout, capturing stdout/stderr.
+5. If exit code != 0, map to EngineExecutionError (backend_name="ltesat").
+6. Parse the output (stdout or files) into a `PassResult` domain object.
+7. Return `PassResult` through the port interface.
+
+All of the following implementation details are hidden inside the adapter:
+
+  * Extended JSON serialization.
+  * Preprocessor directives.
+  * Config file path management.
+  * Specific ltesat flags.
+  * Output text format and parsing logic.
+
+### 6.2 LteSatMissionControlAdapter
+
+Similarly, `LteSatMissionControlAdapter` implements `MissionControlEngine`.
+
+For `start_session`:
+
+1. Build mission-control `LteSatConfig` from `MissionControlPlan`.
+2. Serialize to config file.
+3. Spawn ltesat with `-m config_path` in a long-lived mode.
+4. Wrap the running process and any log/telemetry channels in a
+   `MissionControlSession` object.
+
+The session object provides:
+
+  * `get_status()` – by parsing current logs, telemetry, or status output.
+  * `stop(graceful)` – by signalling the process or writing a control token.
+  * `is_running()` – by checking the process handle.
+  * `get_recent_logs(n)` – from buffered stdout/stderr or log files.
+
+
+7. Additional Backends
+----------------------
+
+Because the ports are domain-oriented, adding more backends is straightforward.
+
+Examples:
+
+### 7.1 CloudNtnEngineAdapter
+
+Implements `SatelliteEngine`, but:
+
+  * Builds a JSON payload instead of a config file.
+  * Sends HTTP requests to a cloud API.
+  * Parses JSON responses into `PassResult`, `TrajectoryResult`, etc.
+
+Application code remains unchanged; only engine selection differs.
+
+### 7.2 MockEngineAdapter
+
+Implements `SatelliteEngine` and optionally `MissionControlEngine`:
+
+  * Returns deterministic synthetic data for tests.
+  * Allows unit tests to run without ltesat installed.
+
+This is extremely useful in CI or in pure logic tests for scheduling.
+
+
+8. Engine Selection: Factory and Registry
+-----------------------------------------
+
+To make the backend choice configurable, use a factory/registry abstraction.
+
+Example concept:
+
+  * Enum-like `EngineKind` with values: "ltesat", "mock", "cloud-ntn", ...
+  * `SatelliteEngineFactory` that knows how to build adapters by kind.
+
+Pseudo-interface:
+
+  * create_engine(kind: EngineKind, backend_config: EngineBackendConfig)
+        -> SatelliteEngine
+  * create_mission_control(kind: EngineKind, backend_config: EngineBackendConfig)
+        -> MissionControlEngine?
+
+Factory behavior:
+
+  * If `kind == "ltesat"`, expect `LteSatBackendConfig` and return
+    `LteSatEngineAdapter`.
+  * If `kind == "mock"`, ignore backend config or use a simple mock config and
+    return `MockEngineAdapter`.
+  * If `kind == "cloud-ntn"`, expect some `CloudNtnBackendConfig` and return
+    `CloudNtnEngineAdapter`.
+
+At application level, code looks like:
+
+    factory = DefaultSatelliteEngineFactory()
+    engine = factory.create_engine("ltesat", ltesat_backend_cfg)
+
+    passes = engine.compute_passes(pass_request)
+
+To switch backend, only `"ltesat"` and the backend config change. Application
+logic does not.
+
+
+9. Handling Backend-Specific Extra Features
+-------------------------------------------
+
+Sometimes a backend has extra features that do not make sense in the generic
+ports. For example, ltesat might support a special export mode or debug modes.
+
+We want to avoid polluting the interfaces with things that only ltesat can do.
+
+Two complementary strategies:
+
+### 9.1 Capability Extensions
+
+Add an `extensions` map in `EngineCapabilities`:
+
+  * extensions: map<string, string>
+
+This can include keys like `"ltesat.special_export": "1"`.
+
+Code that is aware of ltesat can read these keys; generic code can ignore
+them safely.
+
+### 9.2 Downcasting / Backend Introspection
+
+In some situations, higher-level code might explicitly require a particular
+backend. In a typed language, this could be a downcast from `SatelliteEngine`
+to `LteSatEngineAdapter` when the caller *knows* the kind.
+
+Alternatively, provide a method in the engine:
+
+  * `get_backend_name() -> string`
+
+and then maintain a registry elsewhere that maps backend name to known
+features. The important point is to avoid making core flows depend on
+backend-specific calls.
+
+
+10. Error Abstraction
+---------------------
+
+Each backend has its own raw error forms. We want to expose a set of
+backend-agnostic error types through the ports.
+
+Recommended abstract error classes:
+
+  * ConfigValidationError
+  * EngineExecutionError
+      - backend_name: string
+      - exit_code: int?
+      - message: string
+  * OutputParsingError
+      - backend_name: string
+      - raw_output_excerpt: string
+
+For `ltesat`, the adapter would:
+
+  * Map non-zero exit codes to EngineExecutionError with
+    backend_name = "ltesat".
+  * Map unexpected output to OutputParsingError with an excerpt of stdout or
+    the relevant file.
+
+Other backends map their own error mechanisms (HTTP codes, internal
+exceptions) to the same abstract error classes. Application code only needs
+to catch the abstract errors and inspect fields minimally.
+
+
+11. Summary
+-----------
+
+To make `ltesat` plug-and-play as just one possible backend in a generic
+satellite/NTN simulation system:
+
+  * Define stable, backend-agnostic ports:
+      - SatelliteEngine for toolbox-style operations.
+      - MissionControlEngine for long-lived mission-control behavior.
+  * Model all requests and responses using pure domain data types
+    (PassRequest, PassResult, TrajectoryRequest, TrajectoryResult, etc.).
+  * Implement per-backend adapters (LteSatEngineAdapter, etc.) that:
+      - Convert domain requests to backend-specific configs or API calls.
+      - Invoke the backend (process, HTTP, library).
+      - Parse backend responses into domain results.
+  * Separate backend-specific configuration parameters into dedicated
+    BackendConfig types known only to adapters.
+  * Provide an EngineCapabilities abstraction so callers can discover what
+    features a backend supports.
+  * Use a factory/registry to construct engines by kind so the application
+    can easily switch between `ltesat`, mocks, and other engines.
+  * Map backend-specific failures into a common error hierarchy.
+
+With this design, `ltesat` can be integrated deeply into an application while
+remaining fully replaceable by alternative engines without breaking domain
+logic.
