@@ -23,7 +23,7 @@ class QuadraticProblem(DesignProblem):
 
     rng: random.Random = field(default_factory=random.Random)
 
-    def sample_design(self) -> float:
+    def sample_one_design(self) -> float:
         # Propose a candidate x uniformly from [-10, 10].
         return self.rng.uniform(-10.0, 10.0)
 

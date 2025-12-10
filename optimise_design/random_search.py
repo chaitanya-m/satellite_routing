@@ -4,9 +4,9 @@ Overview
 --------
 This optimiser performs pure Monte Carlo search with very simple behaviour:
 
-* At each call to :meth:`propose_candidates`, it samples designs independently
-  using :meth:`DesignProblem.sample_design`. The samples are i.i.d.; there is
-  no adaptation based on previous results.
+* At each call to :meth:`propose_candidate`, it samples designs independently
+  using :meth:`DesignProblem.sample_one_design`. The samples are i.i.d.; there
+  is no adaptation based on previous results.
 * It never builds a model of the design space; it simply keeps the best scored
   candidate seen so far via :meth:`candidate_set`.
 
@@ -46,7 +46,7 @@ class RandomSearchOptimiser(DesignOptimiser):
     _best: Optional[Tuple[Any, float]] = field(default=None, init=False)
 
     def propose_candidate(self, problem: DesignProblem) -> Any:
-        return problem.sample_design()
+        return problem.sample_one_design()
 
     def record_result(self, design: Any, score: float) -> None:
         if self._best is None or score > self._best[1]:

@@ -25,8 +25,12 @@ class DesignProblem(Protocol):
     document and enforce the structure they expect.
     """
 
-    def sample_design(self) -> Any:
-        """Return a random or heuristic starting design."""
+    def sample_one_design(self) -> Any:
+        """Return a single random or heuristic design.
+
+        This may be used directly by simple optimisers (e.g. random search) or
+        serve as a building block for more sophisticated proposal strategies.
+        """
 
         ...
 
