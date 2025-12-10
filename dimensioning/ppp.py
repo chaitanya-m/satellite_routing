@@ -8,7 +8,7 @@ are generated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp, sqrt
+from math import exp, sqrt, tau
 from typing import Any, Callable, List, Mapping, Optional, Protocol
 
 import random
@@ -79,3 +79,33 @@ def sample_ppp(params: PPPParams, region: Region, rng: Optional[random.Random] =
         points.append(Point(location=location, mark=mark))
     return points
 
+
+@dataclass(frozen=True)
+class CircularOrbit(Region):
+    """One-dimensional circular region representing a single orbital ring.
+
+    This is a simple helper for satellite dimensioning experiments where we
+    want a homogeneous PPP along a circular orbit around the Earth.
+
+    Attributes:
+        radius_km:
+            Radius of the orbit in kilometres. The PPP is defined over the
+            circle at this radius; the linear measure is ``2π * radius_km``.
+        origin:
+            Optional identifier or metadata describing the orbital frame. This
+            is not used in sampling but may be helpful for downstream code.
+    """
+
+    radius_km: float
+    origin: Optional[str] = None
+
+    def volume(self) -> float:
+        """Return the circumference, used as the 1D 'volume' of the region."""
+
+        return tau * self.radius_km
+
+    def sample_location(self, rng: random.Random) -> Any:
+        """Return a uniform point on the orbit as an angle in radians."""
+
+        angle = rng.random() * tau
+        return {"angle_rad": angle, "radius_km": self.radius_km, "origin": self.origin}
