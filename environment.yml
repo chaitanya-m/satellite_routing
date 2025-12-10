@@ -1,6 +1,9 @@
 name: satsim
 dependencies:
-  - python=3.14
+  - python=3.13
   - pytest
   - pandas
   - pyyaml
+  - pip
+  - pip:
+      - nevergrad
