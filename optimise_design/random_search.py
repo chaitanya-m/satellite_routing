@@ -54,3 +54,8 @@ class RandomSearchOptimiser(DesignOptimiser):
 
     def current_best(self) -> Optional[Tuple[Any, float]]:
         return self._best
+
+    def supports(self, problem: DesignProblem) -> bool:  # noqa: ARG002
+        """Random search can work with any DesignProblem."""
+
+        return True

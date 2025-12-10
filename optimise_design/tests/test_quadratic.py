@@ -29,7 +29,7 @@ class QuadraticProblem(DesignProblem):
 
     def evaluate(self, design: Any) -> float:
         # Simulate an expensive evaluation to make parallelism meaningful.
-        time.sleep(0.01)
+        time.sleep(0.001)
         # Convert whatever we receive into a float and score it.
         x = float(design)
         return -(x - 3.0) ** 2

@@ -19,7 +19,7 @@ from typing import Any, Optional, Protocol, Tuple
 
 
 class DesignProblem(Protocol):
-    """Abstract optimisation problem over a design space.
+    """Abstract optimisation problem over a design space - what to optimise.
 
     A design is intentionally left as ``Any`` here; concrete problems should
     document and enforce the structure they expect.
@@ -46,7 +46,7 @@ class DesignProblem(Protocol):
 
 
 class DesignOptimiser(Protocol):
-    """Strategy for exploring a design space."""
+    """Strategy for exploring a design space. - how to optimise."""
 
     def propose_candidate(self, problem: DesignProblem) -> Any:
         """Return a single candidate design that should be evaluated next.
@@ -71,6 +71,17 @@ class DesignOptimiser(Protocol):
             A tuple ``(design, score)`` for the best candidate encountered
             according to the optimiser's internal notion of quality, or
             ``None`` if no candidates have been evaluated yet.
+        """
+
+        ...
+
+    def supports(self, problem: DesignProblem) -> bool:
+        """Return True if this optimiser can be applied to ``problem``.
+
+        Implementations should use structural checks (e.g., ``hasattr`` or
+        ``isinstance`` against small Protocols) to decide whether the problem
+        exposes the operations they require. Simple optimisers that work with
+        any :class:`DesignProblem` may always return ``True``.
         """
 
         ...
@@ -104,3 +115,12 @@ def run_optimisation(
         remaining -= 1
 
     return optimiser.current_best()
+
+
+def compatible_optimisers(
+    problem: DesignProblem,
+    optimisers: Tuple[DesignOptimiser, ...],
+) -> Tuple[DesignOptimiser, ...]:
+    """Return the subset of ``optimisers`` that support ``problem``."""
+
+    return tuple(opt for opt in optimisers if opt.supports(problem))
