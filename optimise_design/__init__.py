@@ -9,6 +9,7 @@ from .interface import (
 from .parallel import run_optimisation_parallel
 from .random_search import RandomSearchOptimiser
 from .bayesian_bandit import BayesianBanditOptimiser
+from .bayesian_linear_optimiser import BayesianLinearOptimiser
 
 __all__ = [
     "DesignProblem",
@@ -18,4 +19,5 @@ __all__ = [
     "compatible_optimisers",
     "RandomSearchOptimiser",
     "BayesianBanditOptimiser",
+    "BayesianLinearOptimiser",
 ]

@@ -1,13 +1,33 @@
 """Thompson sampling bandit optimiser built on a Beta-Bernoulli model.
 
-This optimiser treats each distinct design as an arm. Scores in ``record_result``
-are assumed to lie in ``[0, 1]``; they are interpreted as fractional successes
-for a Beta posterior (e.g., coverage, conversion rate, success probability).
+This optimiser treats each distinct design as an arm. Scores in
+``record_result`` are assumed to lie in ``[0, 1]``; they are interpreted as
+fractional successes for a Beta posterior (e.g., coverage, conversion rate,
+success probability).
 
-It uses Thompson sampling to pick the next candidate: sample a draw from each
-arm's posterior and select the arm with the highest draw. When no arms exist
-yet, or when the optimiser is still exploring, it samples new designs from the
-problem via ``sample_one_design``.
+Objective: maximise the expected score in ``[0, 1]``. Each recorded score is
+treated as a (possibly fractional) success for that arm's Beta posterior, and
+the optimiser seeks the arm with the highest posterior mean.
+
+Optimisation loop:
+
+1) Call :func:`run_optimisation`; on the first iteration there are no arms, so
+   the optimiser samples a design from ``problem.sample_one_design``, creates
+   an arm for it, and records its score as a Beta update. If
+   ``min_observations_before_exploit`` > 1, it may sample a few more designs
+   before switching to pure Thompson sampling.
+2) As soon as at least one arm exists, each iteration does Thompson sampling:
+   - draw one sample from each arm's Beta posterior,
+   - pick the arm with the highest sample (exploit high-mean arms, explore
+     uncertain arms with wide posteriors),
+   - occasionally explore a brand-new design if allowed.
+3) ``record_result`` updates only the chosen arm's posterior (alpha/beta) with
+   the new score.
+4) ``current_best`` returns the arm with the highest posterior mean so far.
+
+This loop repeats until your budget is exhausted: the bandit keeps a compact
+posterior per arm, proposes a design each step, and tracks the best design it
+has seen according to the accumulated Beta posteriors.
 """
 from __future__ import annotations
 
@@ -128,6 +148,9 @@ class BayesianBanditOptimiser(DesignOptimiser):
     def export_posterior_summary(self) -> Dict[str, Any]:
         """Return a serialisable summary of the current arm posteriors."""
         return {
+            # summary_type is a small, stable contract consumed by the meta layer.
+            "summary_type": "beta_posterior",
+            # optimiser_type is retained for human readability/debugging.
             "optimiser_type": "BayesianBanditOptimiser",
             "arms": [
                 {
