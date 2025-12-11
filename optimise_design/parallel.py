@@ -1,4 +1,4 @@
-"""Parallel helpers for design optimisation.
+"""Parallel utilities for design optimisation.
 
 These utilities build on the core :mod:`optimise_design.interface` abstractions
 without changing them. Parallelism is treated as an implementation detail:
@@ -42,7 +42,7 @@ def run_optimisation_parallel(
 
     Notes
     -----
-    This helper does not implement any convergence logic itself; it simply
+    This utility does not implement any convergence logic itself; it simply
     drives the optimiser until the evaluation budget is exhausted while keeping
     up to ``max_workers`` evaluations in flight. The optimiser remains unaware
     of the parallelism and processes one ``(design, score)`` pair at a time via
@@ -65,7 +65,7 @@ def _run_parallel_with_executor(
     budget: int,
     executor: Executor,
 ) -> Optional[Tuple[Any, float]]:
-    """Internal helper that assumes an executor is already available."""
+    """Internal utility that assumes an executor is already available."""
 
     submitted = 0
     in_flight: Dict[Future, Any] = {}
@@ -94,4 +94,3 @@ def _run_parallel_with_executor(
                 submitted += 1
 
     return optimiser.current_best()
-

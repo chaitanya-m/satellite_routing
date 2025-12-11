@@ -54,7 +54,7 @@ class DesignOptimiser(Protocol):
         Implementations may use their internal state (including any previously
         recorded results) to decide which parts of the design space to explore
         or exploit. The ``problem`` argument is available so optimisers can
-        access ``sample_design`` or other helper methods if needed.
+        access ``sample_design`` or other utility methods if needed.
         """
 
         ...
@@ -99,7 +99,7 @@ def run_optimisation(
     * ``budget`` is the total number of calls to :meth:`DesignProblem.evaluate`
       that will be performed.
 
-    This helper does not implement any convergence logic itself or any
+    This utility does not implement any convergence logic itself or any
     parallelism; it simply drives the :class:`DesignOptimiser` for ``budget``
     single-candidate evaluations and then returns ``optimiser.current_best()``.
     """
