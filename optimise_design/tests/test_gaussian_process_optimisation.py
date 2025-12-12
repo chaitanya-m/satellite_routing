@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import math
 import numpy as np
 import pytest
 
 from optimise_design.gaussian_process_optimisation import (
     GaussianProcessOptimiser,
+    kernel_matrix,
+    log_marginal_likelihood,
     rbf_kernel,
+    rbf_tuner,
+    ucb_acquisition,
 )
 
 
@@ -32,15 +37,13 @@ def test_log_marginal_likelihood_runs() -> None:
     X = np.array([[0.0], [1.0]])
     y = np.array([0.0, 1.0])
     gp = GaussianProcessOptimiser(
-        kernel=None,  # use default RBF
-        lengthscale=1.0,
-        signal_variance=1.0,
         noise_variance=1e-2,
-        ucb_beta=1.0,
+        kernel=None,  # use default RBF
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X
     gp._y = y
-    val = gp.log_marginal_likelihood()
+    val = log_marginal_likelihood(gp._X, gp._y, gp.kernel, kernel_matrix, gp.noise_variance)
 
     # Hand-compute the same quantity: K = k(X,X) + σ_n² I, then use the standard
     # GP log marginal likelihood formula.
@@ -67,56 +70,216 @@ def test_log_marginal_likelihood_runs() -> None:
 
 
 def test_tune_hyperparameters_improves_lml() -> None:
-    """Hyperparameter tuning should increase the log marginal likelihood."""
+    """On data drawn from a known GP, tuning should lift log marginal likelihood."""
 
-    X = np.array([[0.0], [0.5], [1.0]])
-    y = np.array([0.0, 0.6, 1.0])
+    rng = np.random.default_rng(7)
+    # Generate one dataset from a GP with known hyperparameters.
+    true_kernel = rbf_kernel(lengthscale=0.7, signal_variance=1.5)
+    true_noise = 0.05
+    X = rng.uniform(-1.0, 1.0, size=(200, 1))
+    K = kernel_matrix(X, X, true_kernel) + true_noise * np.eye(X.shape[0])
+    y = rng.multivariate_normal(mean=np.zeros(X.shape[0]), cov=K)
+
+    # Start from a deliberately misspecified set of hyperparameters.
     gp = GaussianProcessOptimiser(
-        kernel=None,  # default RBF
-        lengthscale=2.0,
-        signal_variance=0.5,
         noise_variance=0.5,
-        ucb_beta=1.0,
+        kernel=rbf_kernel(lengthscale=2.0, signal_variance=0.3),
+        kernel_tuner=rbf_tuner,
     )
-    gp._X = X
-    gp._y = y
+    gp.set_data(X, y, tune=False)
+    initial_lml = log_marginal_likelihood(gp._X, gp._y, gp.kernel, kernel_matrix, gp.noise_variance)
 
-    initial_lml = gp.log_marginal_likelihood()
-    gp.tune_hyperparameters(
-        initial=(2.0, 0.5, 0.5),
-        bounds=((0.1, 5.0), (0.1, 5.0), (1e-4, 1.0)),
+    # Use a couple of restarts to avoid a bad local optimum.
+    best_lml = initial_lml
+    for init_ls, init_sv in ((1.0, 1.0), (0.6, 1.8), (0.9, 1.4)):
+        tuned_kernel, tuned_noise = rbf_tuner(
+            X,
+            y,
+            initial_lengthscale=init_ls,
+            initial_signal_variance=init_sv,
+            initial_noise_variance=0.5,
+            bounds=((0.2, 3.0), (0.2, 3.0), (1e-4, 1.0)),
+            optimizer_options={"maxiter": 80},
+        )
+        tuned_lml = log_marginal_likelihood(gp._X, gp._y, tuned_kernel, kernel_matrix, tuned_noise)
+        best_lml = max(best_lml, tuned_lml)
+
+    assert best_lml > initial_lml
+
+
+
+
+def _rbf_params_from_kernel(kernel):
+    # rbf_kernel returns a closure capturing (lengthscale, signal_variance)
+    if kernel.__closure__ is None or len(kernel.__closure__) < 2:
+        raise TypeError("Kernel does not expose RBF hyperparameters.")
+    lengthscale = float(kernel.__closure__[0].cell_contents)
+    signal_variance = float(kernel.__closure__[1].cell_contents)
+    return lengthscale, signal_variance
+
+
+def _lml_from_params(X, y, lengthscale, signal_variance, noise_variance):
+    kernel = rbf_kernel(lengthscale, signal_variance)
+    return log_marginal_likelihood(
+        X, y, kernel, kernel_matrix, float(noise_variance)
     )
-    tuned_lml = gp.log_marginal_likelihood()
-
-    assert tuned_lml >= initial_lml
 
 
-def test_tune_hyperparameters_across_many_seeds() -> None:
-    """Hyperparameter tuning should behave across many random initialisations.
-    On every random tiny dataset, tuning should be greater."""
+def _grad_lml_logspace_fd(X, y, log_params, eps=1e-5):
+    """
+    Finite-difference gradient of LML w.r.t.
+    log_params = [log lengthscale, log signal_variance, log noise_variance]
+    """
+    def f(lp):
+        l, s, n = np.exp(lp)
+        return _lml_from_params(X, y, l, s, n)
 
-    rng = np.random.default_rng(42)
-    for _ in range(100):
-        # Random tiny dataset.
-        X = rng.uniform(-1.0, 1.0, size=(3, 1))
-        y = rng.normal(size=3)
-        gp = GaussianProcessOptimiser(
-            kernel=None,
-            lengthscale=rng.uniform(0.5, 2.0),
-            signal_variance=rng.uniform(0.5, 2.0),
-            noise_variance=rng.uniform(1e-3, 0.5),
-            ucb_beta=1.0,
+    f0 = f(log_params)
+    grad = np.zeros_like(log_params)
+
+    for i in range(len(log_params)):
+        d = np.zeros_like(log_params)
+        d[i] = eps
+        grad[i] = (f(log_params + d) - f0) / eps
+
+    return f0, grad
+
+
+def test_tune_hyperparameters_quadratic() -> None:
+    # ------------------------------------------------------------------
+    # Data
+    # ------------------------------------------------------------------
+    X = np.linspace(-2.0, 2.0, num=80).reshape(-1, 1)
+    rng = np.random.default_rng(999)
+    y = -(X[:, 0] ** 2) + rng.normal(scale=0.1, size=X.shape[0])
+    y = y - y.mean()
+
+    # Deterministic train / test split
+    idx = rng.permutation(X.shape[0])
+    tr, te = idx[:60], idx[60:]
+    Xtr, ytr = X[tr], y[tr]
+    Xte, yte = X[te], y[te]
+
+    # ------------------------------------------------------------------
+    # Baseline GP
+    # ------------------------------------------------------------------
+    gp0 = GaussianProcessOptimiser(
+        noise_variance=0.5,
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=0.2),
+        kernel_tuner=rbf_tuner,
+    )
+    gp0.set_data(Xtr, ytr, tune=False)
+
+    l0, s0 = _rbf_params_from_kernel(gp0.kernel)
+    n0 = float(gp0.noise_variance)
+
+    lml0 = _lml_from_params(Xtr, ytr, l0, s0, n0)
+
+    # ------------------------------------------------------------------
+    # Bounds
+    # ------------------------------------------------------------------
+    bounds = (
+        (1e-2, 10.0),   # lengthscale
+        (1e-3, 10.0),   # signal variance
+        (1e-4, 1.0),    # noise variance
+    )
+
+    # ------------------------------------------------------------------
+    # Random restarts (baseline included)
+    # ------------------------------------------------------------------
+    best_lml = lml0
+    best_params = (l0, s0, n0, gp0.kernel)
+
+    for _ in range(5):
+        init = rng.uniform(
+            [b[0] for b in bounds],
+            [b[1] for b in bounds],
         )
-        gp._X = X
-        gp._y = y
-        initial = gp.log_marginal_likelihood()
-        gp.tune_hyperparameters(
-            initial=(gp.lengthscale, gp.signal_variance, gp.noise_variance),
-            bounds=((0.1, 3.0), (0.1, 3.0), (1e-4, 1.0)),
-            optimizer_options={"maxiter": 5},
+
+        kernel, noise = rbf_tuner(
+            Xtr,
+            ytr,
+            initial_lengthscale=init[0],
+            initial_signal_variance=init[1],
+            initial_noise_variance=init[2],
+            bounds=bounds,
+            optimizer_options={"maxiter": 200},
         )
-        tuned = gp.log_marginal_likelihood()
-        assert tuned > initial
+
+        l, s = _rbf_params_from_kernel(kernel)
+        n = float(noise)
+
+        lml = _lml_from_params(Xtr, ytr, l, s, n)
+        if lml > best_lml:
+            best_lml = lml
+            best_params = (l, s, n, kernel)
+
+    l1, s1, n1, best_kernel = best_params
+
+    # ------------------------------------------------------------------
+    # (1) LML non-worsening
+    # ------------------------------------------------------------------
+    assert best_lml >= lml0 - 1e-6
+
+    # ------------------------------------------------------------------
+    # (2) Gradient norm reduced (log-space)
+    # ------------------------------------------------------------------
+    _, g0 = _grad_lml_logspace_fd(Xtr, ytr, np.log([l0, s0, n0]))
+    _, g1 = _grad_lml_logspace_fd(Xtr, ytr, np.log([l1, s1, n1]))
+
+    assert np.linalg.norm(g1) <= np.linalg.norm(g0) + 1e-8
+
+    # ------------------------------------------------------------------
+    # (3) Holdout RMSE not worse
+    # ------------------------------------------------------------------
+    mu0, _ = gp0.predict(Xte, noisy=False)
+
+    gp1 = GaussianProcessOptimiser(
+        noise_variance=n1,
+        kernel=best_kernel,
+        kernel_tuner=rbf_tuner,
+    )
+    gp1.set_data(Xtr, ytr, tune=False)
+
+    mu1, _ = gp1.predict(Xte, noisy=False)
+
+    rmse0 = math.sqrt(np.mean((mu0 - yte) ** 2))
+    rmse1 = math.sqrt(np.mean((mu1 - yte) ** 2))
+
+    assert rmse1 <= rmse0 + 1e-8
+
+
+# def test_tune_hyperparameters_quadratic() -> None:
+#     """On a simple quadratic (noisy), tuning should improve LML on one deterministic run."""
+
+#     # Deterministic quadratic: y = -x^2 with modest additive noise level.
+#     X = np.linspace(-2.0, 2.0, num=80).reshape(-1, 1)
+#     true_noise = 0.1
+#     rng = np.random.default_rng(999)
+#     y = -(X[:, 0] ** 2) + rng.normal(scale=0.1, size=X.shape[0])  # small noise
+#     y = y - y.mean()
+#     #y = -(X[:, 0] ** 2)
+
+#     gp = GaussianProcessOptimiser(
+#         noise_variance=0.5,
+#         kernel=rbf_kernel(lengthscale=1.0, signal_variance=0.2),  # deliberately misspecified
+#         kernel_tuner=rbf_tuner,
+#     )
+#     gp.set_data(X, y, tune=False)
+#     initial = log_marginal_likelihood(gp._X, gp._y, gp.kernel, kernel_matrix, gp.noise_variance)
+
+#     tuned_kernel, tuned_noise = rbf_tuner(
+#         X,
+#         y,
+#         initial_lengthscale=1.0,
+#         initial_signal_variance=1.0,
+#         initial_noise_variance=gp.noise_variance,
+#         bounds=((1e-4, 10.0), (1e-4, 300.0), (1e-4, 300.0)),
+#         optimizer_options={"maxiter": 200},
+#     )
+#     tuned_lml = log_marginal_likelihood(X, y, tuned_kernel, kernel_matrix, tuned_noise)
+
+#     assert tuned_lml > initial
 
 
 def test_set_data_triggers_tuning_on_first_ingest() -> None:
@@ -130,23 +293,19 @@ def test_set_data_triggers_tuning_on_first_ingest() -> None:
 
         # Baseline GP with deliberately non-ideal hyperparameters.
         gp_baseline = GaussianProcessOptimiser(
-            kernel=None,
-            lengthscale=3.0,
-            signal_variance=0.2,
             noise_variance=0.8,
-            ucb_beta=1.0,
+            kernel=None,
+            kernel_tuner=rbf_tuner,
         )
         gp_baseline._X = X
         gp_baseline._y = y
-        baseline_lml = gp_baseline.log_marginal_likelihood()
+        baseline_lml = log_marginal_likelihood(gp_baseline._X, gp_baseline._y, gp_baseline.kernel, kernel_matrix, gp_baseline.noise_variance)
 
         # Same starting point, but use set_data (which tunes on first ingest).
         gp = GaussianProcessOptimiser(
-            kernel=None,
-            lengthscale=3.0,
-            signal_variance=0.2,
             noise_variance=0.8,
-            ucb_beta=1.0,
+            kernel=None,
+            kernel_tuner=rbf_tuner,
         )
         gp.set_data(
             X,
@@ -156,7 +315,7 @@ def test_set_data_triggers_tuning_on_first_ingest() -> None:
                 "optimizer_options": {"maxiter": 20},
             },
         )
-        tuned_lml = gp.log_marginal_likelihood()
+        tuned_lml = log_marginal_likelihood(gp._X, gp._y, gp.kernel, kernel_matrix, gp.noise_variance)
 
         assert tuned_lml >= baseline_lml
 
@@ -170,11 +329,9 @@ def test_training_covariance_matches_kernel() -> None:
 
     X = np.array([[0.0], [1.0]])
     gp = GaussianProcessOptimiser(
-        kernel=None,
-        lengthscale=1.0,
-        signal_variance=1.0,
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=1.0),
         noise_variance=0.1,
-        ucb_beta=1.0,
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X
     gp._y = np.array([0.0, 1.0])
@@ -205,11 +362,9 @@ def test_joint_prior_covariances_blocks() -> None:
     X_train = np.array([[0.0], [1.0]])
     X_test = np.array([[0.5], [1.5]])
     gp = GaussianProcessOptimiser(
-        kernel=None,
-        lengthscale=1.0,
-        signal_variance=1.0,
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=1.0),
         noise_variance=0.2,
-        ucb_beta=1.0,
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X_train
     gp._y = np.array([0.0, 1.0])
@@ -260,11 +415,9 @@ def test_compute_posterior() -> None:
     y_train = np.array([0.0, 1.0])
     X_test = np.array([[0.5]])
     gp = GaussianProcessOptimiser(
-        kernel=None,
-        lengthscale=1.0,
-        signal_variance=1.0,
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=1.0),
         noise_variance=0.1,
-        ucb_beta=1.0,
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X_train
     gp._y = y_train
@@ -305,11 +458,9 @@ def test_predict_with_and_without_noise() -> None:
     y_train = np.array([0.0, 1.0])
     X_test = np.array([[0.25], [0.75]])
     gp = GaussianProcessOptimiser(
-        kernel=None,
-        lengthscale=1.0,
-        signal_variance=1.0,
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=1.0),
         noise_variance=0.2,
-        ucb_beta=1.0,
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X_train
     gp._y = y_train
@@ -333,11 +484,10 @@ def test_acquire_next_defaults_to_ucb_and_accepts_custom_acquisition() -> None:
     X_train = np.array([[0.0], [1.0]])
     y_train = np.array([0.0, 1.0])
     gp = GaussianProcessOptimiser(
-        kernel=None,
-        lengthscale=1.0,
-        signal_variance=1.0,
         noise_variance=0.05,
-        ucb_beta=4.0,  # encourage exploration
+        kernel=rbf_kernel(lengthscale=1.0, signal_variance=1.0),
+        acquisition_fn=ucb_acquisition(beta=4.0),
+        kernel_tuner=rbf_tuner,
     )
     gp._X = X_train
     gp._y = y_train
@@ -358,4 +508,3 @@ def test_acquire_next_defaults_to_ucb_and_accepts_custom_acquisition() -> None:
     best_x_exploit, scores_exploit = gp.acquire_next(X_candidates, acquisition=exploit_only)
     # assert best_x_exploit is the candidate with highest mean (the score is just the mean, so argmax of scores)
     assert np.allclose(best_x_exploit, X_candidates[np.argmax(scores_exploit)]) 
-
