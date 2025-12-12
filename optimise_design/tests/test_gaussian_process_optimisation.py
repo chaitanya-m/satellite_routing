@@ -143,3 +143,53 @@ def test_training_covariance_matches_kernel() -> None:
     )
     expected += 0.1 * np.eye(2)
     assert np.allclose(cov, expected)
+
+
+def test_joint_prior_covariances_blocks() -> None:
+    """joint_prior_covariances should return all four blocks explicitly."""
+
+    X_train = np.array([[0.0], [1.0]])
+    X_test = np.array([[0.5], [1.5]])
+    gp = GaussianProcessOptimiser(
+        kernel=None,
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=0.2,
+        ucb_beta=1.0,
+    )
+    gp._X = X_train
+    gp._y = np.array([0.0, 1.0])
+
+    K_tt, K_tT, K_Tt, K_TT = gp.joint_prior_covariances(X_test)
+
+    # Manually compute expected blocks.
+    def k(x: np.ndarray, z: np.ndarray) -> float:
+        diff = x - z
+        return float(np.exp(-0.5 * np.dot(diff, diff)))
+
+    expected_tt = np.array(
+        [
+            [k(X_train[0], X_train[0]), k(X_train[0], X_train[1])],
+            [k(X_train[1], X_train[0]), k(X_train[1], X_train[1])],
+        ]
+    )
+    expected_tt += 0.2 * np.eye(2)
+
+    expected_tT = np.array(
+        [
+            [k(X_train[0], X_test[0]), k(X_train[0], X_test[1])],
+            [k(X_train[1], X_test[0]), k(X_train[1], X_test[1])],
+        ]
+    )
+    expected_Tt = expected_tT.T
+    expected_TT = np.array(
+        [
+            [k(X_test[0], X_test[0]), k(X_test[0], X_test[1])],
+            [k(X_test[1], X_test[0]), k(X_test[1], X_test[1])],
+        ]
+    )
+
+    assert np.allclose(K_tt, expected_tt)
+    assert np.allclose(K_tT, expected_tT)
+    assert np.allclose(K_Tt, expected_Tt)
+    assert np.allclose(K_TT, expected_TT)

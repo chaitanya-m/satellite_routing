@@ -219,3 +219,20 @@ class GaussianProcessOptimiser:
             raise ValueError("No training inputs available.")
         K = self._kernel_matrix(self._X, self._X)
         return K + self.noise_variance * np.eye(K.shape[0])
+
+    def joint_prior_covariances(
+        self, X_test: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return (K_train_train, K_train_test, K_test_train, K_test_test)."""
+        if self._X is None:
+            raise ValueError("No training inputs available.")
+
+        # Train/train block with observation noise on the diagonal.
+        K_train_train = self._kernel_matrix(self._X, self._X)
+        K_train_train = K_train_train + self.noise_variance * np.eye(K_train_train.shape[0])
+
+        # Cross-covariance blocks and test/test block from the tuned kernel.
+        K_train_test = self._kernel_matrix(self._X, X_test)
+        K_test_train = self._kernel_matrix(X_test, self._X)
+        K_test_test = self._kernel_matrix(X_test, X_test)
+        return K_train_train, K_train_test, K_test_train, K_test_test
