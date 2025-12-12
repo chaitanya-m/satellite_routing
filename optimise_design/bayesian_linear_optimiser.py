@@ -15,23 +15,26 @@ noise likelihood around ``w^T x`` and updates a shared weight posterior.
 Optimisation loop:
 
 1) On the first iteration, there are no observations. The optimiser samples a
-   batch of candidate designs via ``problem.sample_one_design()`` and picks one
-   at random to evaluate (since no posterior exists yet).
+   batch of candidate designs (``sample_candidates`` many; e.g., 10) via
+   ``problem.sample_one_design()`` and picks one at random to evaluate (since
+   no posterior exists yet).
 2) After observations exist, each iteration:
-   - draws a batch of candidates,
+   - draws a batch of candidates (e.g., 10 designs),
    - samples weights ``w̃`` from the current Gaussian posterior ``N(μ, Σ)``, which
      encodes all previous (x, y) observations and the prior; this is the
      Thompson-sampling step that turns posterior uncertainty into exploration by
      occasionally drawing weight vectors that emphasise different features when
      the posterior is still wide,
    - scores each candidate as ``w̃^T x`` using ``problem.encode_vector``,
-   - picks the highest-scoring candidate.
+   - picks the highest-scoring candidate from that batch and **runs a real
+     simulation** via ``evaluate`` only for that single design (the other batch
+     candidates are just scored cheaply).
 3) ``record_result`` updates the shared weight posterior with the new (x, y)
    pair.
 4) ``current_best`` returns the highest-scoring design seen so far.
 
 This loop repeats until budget is exhausted, continually refining a single
-shared model of the reward landscape instead of tracking separate arms.
+shared model of the reward landscape instead of updating separate arms as in the bayesian discrete bandit.
 """
 from __future__ import annotations
 
@@ -59,21 +62,78 @@ class BayesianLinearOptimiser(DesignOptimiser):
     Parameters
     ----------
     prior_precision:
-        Scalar λ for the Gaussian weight prior precision. Larger values impose
-        stronger shrinkage toward zero weights (more conservative, less risk of
-        overfitting), while smaller values allow more flexibility but can
-        overfit if data are scarce. Must be provided explicitly; there is no
-        default.
+    
+        Scalar λ for the Gaussian weight prior precision 
+        
+        In a Gaussian prior, the precision matrix is just the inverse of the covariance matrix.
+        Using precision is standard in Bayesian linear regression because the math (posterior updates) 
+        is cleaner in terms of precision. 
+
+        The covariance matrix here is over the weights.
+        
+        Thus, it describes your uncertainty about the weights: its diagonal entries are the 
+        variances of each weight (how far they’re expected to stray from the mean), and the off‑diagonal 
+        entries are covariances (how weight deviations co‑move). 
+        
+        A “tight” prior (small variances - the diagonal terms) means weights are expected to stay near the mean; 
+        a “loose” prior (large variances) means weights can wander more.
+
+        A larger precision (i.e., smaller covariance) means you assume weights are tightly 
+        concentrated near the prior mean (here a zero-mean prior).
+
+        Our prior covariance is λ^{-1}I, an isotropic Gaussian where all weights are independent and
+        identically distributed. That is, we assume we have no prior knowledge favouring any interactions 
+        between features. This means off-diagonal entries in the covariance (which would encode correlations 
+        between weights) are zero. The precision matrix, being the inverse of covariance, is thus λI.
+        This matrix is diagonal with all diagonal entries equal to λ, reflecting the isotropic assumption.
+        
+        A larger prior precision λ means a tighter prior around zero weights. That is, we are more
+        confident that weights should be close to zero before seeing any data, meaning we expect the features to 
+        be equally uninformative. This is a form of regularization that prevents overfitting to small datasets.
+
+        Conversely, a smaller prior precision λ (larger covariance) means a looser prior, allowing weights to 
+        vary more freely based on observed data, potentially capturing more complex relationships but risking overfitting.
+
+        The prior precision λ is a hyperparameter that reflects our belief about the relative informativeness of the features
+        before seeing any data.
+
+        For example, with λ=10 the posterior will move slowly—several consistent observations are needed to shift weights
+        meaningfully—whereas with λ=0.1 the posterior will adapt quickly but can overreact to a few noisy points. 
+        
+        Must be provided explicitly; there is no default.
+
+        Note: regardless of whether we use a full covariance matrix with non-zero off-diagonals... This optimiser is 
+        linear because the model is restricted to functions of the form f(x) = w^T x (it’s only as rich as the 
+        features supplied)
+
     noise_variance:
-        Observation noise variance σ² for the linear reward model. Smaller
-        values make the optimiser trust observations more (faster learning but
+        Observation noise variance σ² for the linear reward model. 
+        
+        Smaller values make the optimiser trust observations more (faster learning but
         more sensitivity to noise); larger values slow down updates and yield
-        smoother, more cautious learning. Must be set explicitly.
+        smoother, more cautious learning. 
+        
+        σ² controls how much each new
+        observation updates the posterior; low σ² can lead to overreacting to
+        noise, high σ² makes the posterior move slowly. Must be set explicitly.
+
     sample_candidates:
         Number of candidate designs to draw and score per iteration. Higher
         values widen exploration per step but cost more evaluations; lower
         values are cheaper but may miss good regions. Must be provided
-        explicitly.
+        explicitly. 
+        
+        With small batches, the posterior gets updated after seeing only a
+        narrow, potentially unrepresentative subset of designs. That makes it less 
+        likely to sample underexplored regions; the posterior “settles” too quickly.
+        Because it is the posterior that encodes all previous observations and thus 
+        the current understanding, this means the balance between exploration and 
+        exploitation shifts towards exploitation.
+        
+        Larger batches let you score a wider variety of vector designs before each
+        update, supporting better-informed exploration - promising designs may be found
+        in unexplored regions of the design space before the posterior is updated.
+
     rng:
         Optional numpy Generator for reproducibility; defaults to
         ``np.random.default_rng()`` if not supplied.
