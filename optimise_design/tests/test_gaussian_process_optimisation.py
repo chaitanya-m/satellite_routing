@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from optimise_design.gaussian_process_optimisation import (
     GaussianProcessOptimiser,
@@ -59,3 +60,56 @@ def test_log_marginal_likelihood_runs() -> None:
 
     assert np.isfinite(val)
     assert abs(val - expected) < 1e-6
+
+
+def test_tune_hyperparameters_improves_lml() -> None:
+    """Hyperparameter tuning should increase the log marginal likelihood."""
+
+    X = np.array([[0.0], [0.5], [1.0]])
+    y = np.array([0.0, 0.6, 1.0])
+    gp = GaussianProcessOptimiser(
+        kernel=None,  # default RBF
+        lengthscale=2.0,
+        signal_variance=0.5,
+        noise_variance=0.5,
+        ucb_beta=1.0,
+    )
+    gp._X = X
+    gp._y = y
+
+    initial_lml = gp.log_marginal_likelihood()
+    gp.tune_hyperparameters(
+        initial=(2.0, 0.5, 0.5),
+        bounds=((0.1, 5.0), (0.1, 5.0), (1e-4, 1.0)),
+    )
+    tuned_lml = gp.log_marginal_likelihood()
+
+    assert tuned_lml >= initial_lml
+
+
+def test_tune_hyperparameters_across_many_seeds() -> None:
+    """Hyperparameter tuning should behave across many random initialisations.
+    On every random tiny dataset, tuning should be greater."""
+
+    rng = np.random.default_rng(42)
+    for _ in range(100):
+        # Random tiny dataset.
+        X = rng.uniform(-1.0, 1.0, size=(3, 1))
+        y = rng.normal(size=3)
+        gp = GaussianProcessOptimiser(
+            kernel=None,
+            lengthscale=rng.uniform(0.5, 2.0),
+            signal_variance=rng.uniform(0.5, 2.0),
+            noise_variance=rng.uniform(1e-3, 0.5),
+            ucb_beta=1.0,
+        )
+        gp._X = X
+        gp._y = y
+        initial = gp.log_marginal_likelihood()
+        gp.tune_hyperparameters(
+            initial=(gp.lengthscale, gp.signal_variance, gp.noise_variance),
+            bounds=((0.1, 3.0), (0.1, 3.0), (1e-4, 1.0)),
+            optimizer_options={"maxiter": 5},
+        )
+        tuned = gp.log_marginal_likelihood()
+        assert tuned > initial

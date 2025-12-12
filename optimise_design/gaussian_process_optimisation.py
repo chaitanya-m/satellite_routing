@@ -163,3 +163,55 @@ class GaussianProcessOptimiser:
         lml -= float(np.sum(np.log(np.diag(L))))
         lml -= 0.5 * self._X.shape[0] * np.log(2 * np.pi)
         return lml
+
+    def tune_hyperparameters(
+        self,
+        initial: Optional[tuple[float, float, float]] = None,
+        bounds: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = None,
+        method: str = "L-BFGS-B",
+        optimizer_options: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Tune (lengthscale, signal_variance, noise_variance) via maximising log marginal likelihood.
+
+        The likelihood of the data given the model is low if the hyperparameters are poorly chosen.
+        This method optimises the hyperparameters by tuning them to maximise the log marginal likelihood.
+
+        This is one of the advantages of Gaussian Processes: we can learn the hyperparameters from data
+        rather than having to set them manually.
+
+        Uses scipy.optimize.minimize with a default L-BFGS-B optimiser. Parameters
+        are optimised in log-space to enforce positivity. If scipy is unavailable,
+        an ImportError is raised.
+        """
+        try:
+            from scipy.optimize import minimize
+        except ImportError as exc:  # pragma: no cover - dependency optional
+            raise ImportError("scipy is required for hyperparameter optimisation") from exc
+
+        if self._X is None or self._y is None:
+            raise ValueError("No observations to tune hyperparameters.")
+
+        x0 = initial or (self.lengthscale, self.signal_variance, self.noise_variance)
+        log_x0 = np.log(np.array(x0, dtype=float))
+
+        def objective(log_params: np.ndarray) -> float:
+            l, s, n = np.exp(log_params)
+            self.kernel = rbf_kernel(l)
+            self.lengthscale = l
+            self.signal_variance = s
+            self.noise_variance = n
+            return -self.log_marginal_likelihood()
+
+        opt = minimize(
+            objective,
+            log_x0,
+            method=method,
+            bounds=[(np.log(b[0]), np.log(b[1])) for b in bounds] if bounds else None,
+            options=optimizer_options,
+        )
+        # Update with optimised values.
+        l_opt, s_opt, n_opt = np.exp(opt.x)
+        self.kernel = rbf_kernel(l_opt)
+        self.lengthscale = float(l_opt)
+        self.signal_variance = float(s_opt)
+        self.noise_variance = float(n_opt)
