@@ -183,10 +183,7 @@ class GaussianProcessOptimiser:
         are optimised in log-space to enforce positivity. If scipy is unavailable,
         an ImportError is raised.
         """
-        try:
-            from scipy.optimize import minimize
-        except ImportError as exc:  # pragma: no cover - dependency optional
-            raise ImportError("scipy is required for hyperparameter optimisation") from exc
+        from scipy.optimize import minimize
 
         if self._X is None or self._y is None:
             raise ValueError("No observations to tune hyperparameters.")
@@ -215,3 +212,10 @@ class GaussianProcessOptimiser:
         self.lengthscale = float(l_opt)
         self.signal_variance = float(s_opt)
         self.noise_variance = float(n_opt)
+
+    def training_covariance(self) -> np.ndarray:
+        """Return K(X, X) + σ_n² I for the current data."""
+        if self._X is None:
+            raise ValueError("No training inputs available.")
+        K = self._kernel_matrix(self._X, self._X)
+        return K + self.noise_variance * np.eye(K.shape[0])

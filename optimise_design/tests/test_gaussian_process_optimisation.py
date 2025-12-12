@@ -113,3 +113,33 @@ def test_tune_hyperparameters_across_many_seeds() -> None:
         )
         tuned = gp.log_marginal_likelihood()
         assert tuned > initial
+
+
+def test_training_covariance_matches_kernel() -> None:
+    """Covariance utility should include kernel plus noise on the diagonal."""
+
+    X = np.array([[0.0], [1.0]])
+    gp = GaussianProcessOptimiser(
+        kernel=None,
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=0.1,
+        ucb_beta=1.0,
+    )
+    gp._X = X
+    gp._y = np.array([0.0, 1.0])
+
+    cov = gp.training_covariance()
+    # Manually compute expected.
+    def k(x: np.ndarray, z: np.ndarray) -> float:
+        diff = x - z
+        return float(np.exp(-0.5 * np.dot(diff, diff)))
+
+    expected = np.array(
+        [
+            [k(X[0], X[0]), k(X[0], X[1])],
+            [k(X[1], X[0]), k(X[1], X[1])],
+        ]
+    )
+    expected += 0.1 * np.eye(2)
+    assert np.allclose(cov, expected)
