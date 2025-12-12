@@ -313,6 +313,12 @@ class GaussianProcessOptimiser:
         self._X: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
 
+
+        self._L: Optional[np.ndarray] = None
+        self._alpha: Optional[np.ndarray] = None
+        self._cache_valid: bool = False
+
+
     def set_data(
         self,
         X: np.ndarray,
@@ -348,15 +354,36 @@ class GaussianProcessOptimiser:
             if self.kernel_tuner is None:
                 raise RuntimeError("No kernel tuner provided.")
 
-            kernel, noise = self.kernel_tuner(
+            self.kernel, self.noise_variance = self.kernel_tuner(
                 X,
                 y,
                 self.kernel,
                 self.noise_variance,
                 **(tuner_options or {}),
             )
-            self.kernel = kernel
-            self.noise_variance = noise
+
+        # Any data or hyperparameter change invalidates the posterior cache
+        self._cache_valid = False
+
+
+
+    def _ensure_posterior_cache(self) -> None:
+        if self._cache_valid:
+            return
+
+        X, y = self._X, self._y
+        assert X is not None and y is not None
+
+        K = self.kernel.gram(X)
+        K += (self.noise_variance + 1e-8) * np.eye(len(X))
+
+        L = np.linalg.cholesky(K)
+        alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+
+        self._L = L
+        self._alpha = alpha
+        self._cache_valid = True
+
 
     def predict(
         self,
@@ -364,31 +391,68 @@ class GaussianProcessOptimiser:
         noisy: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Predict posterior mean and marginal variance.
+        Predict posterior mean and marginal variance at test points X_star.
         """
+        # Ensure test inputs are 2D: (n_test, d)
         X_star = np.atleast_2d(X_star)
 
         if self._X is None or self._y is None:
             raise ValueError("No training data set.")
 
-        X, y = self._X, self._y
+        # Training data
+        X = self._X            # training inputs (n_train, d)
+        y = self._y            # training targets (n_train,)
 
+        # ============================================================
+        # Build training covariance and solve for posterior coefficients
+        # ============================================================
+
+        # K = K(X, X): covariance between all training points
         K = self.kernel.gram(X)
-        K += (self.noise_variance + 1e-8) * np.eye(len(X)) # jitter for stability
+
+        # Add observation noise and a small jitter term for numerical stability
+        K += (self.noise_variance + 1e-8) * np.eye(len(X))
+
+        # Cholesky factorisation: K = L L^T
+        # L is lower triangular and used for efficient solves
         L = np.linalg.cholesky(K)
 
-        K_star = self.kernel(X, X_star)
+        # Solve (K + σ_n^2 I)^{-1} y using two triangular solves
+        # alpha = (K + σ_n^2 I)^{-1} y
         alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
 
+        # ============================================================
+        # Posterior mean at test points
+        # ============================================================
+
+        # Cross-covariance between training and test points: K(X, X*)
+        K_star = self.kernel(X, X_star)
+
+        # Posterior mean: μ(X*) = K(X*, X) (K + σ_n^2 I)^{-1} y
         mean = K_star.T @ alpha
 
-        v = np.linalg.solve(L, K_star)
-        var = self.kernel.gram(X_star) - v.T @ v # may produce small negative values on diagonal due to float precision issues
+        # ============================================================
+        # Posterior variance at test points
+        # ============================================================
 
+        # Solve L v = K(X, X*)  ⇒  v = L^{-1} K(X, X*)
+        v = np.linalg.solve(L, K_star)
+
+        # Posterior covariance:
+        # Σ(X*) = K(X*, X*) − K(X*, X) (K + σ_n^2 I)^{-1} K(X, X*)
+        var = self.kernel.gram(X_star) - v.T @ v
+
+        # If predicting noisy observations y*, add observation noise
         if noisy:
             var += self.noise_variance * np.eye(len(X_star))
 
+        # ============================================================
+        # Finalise output
+        # ============================================================
+
+        # Extract marginal variances and guard against tiny negative values
         diag = np.diag(var)
-        diag = np.maximum(diag, 0.0) # ensure non-negative variance produced due to float precision issues zeroed
+        diag = np.maximum(diag, 0.0)
+
         return mean.reshape(-1), diag
 
