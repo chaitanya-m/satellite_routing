@@ -23,7 +23,11 @@ def test_rbf_kernel_computes_expected_value() -> None:
 
 
 def test_log_marginal_likelihood_runs() -> None:
-    """log_marginal_likelihood should match a hand-computed value."""
+    """log_marginal_likelihood should match a hand-computed value.
+
+    No hyperparameter tuning; keeping fixed hyperparameters makes the expected
+    value deterministic for the manual calculation.
+    """
 
     X = np.array([[0.0], [1.0]])
     y = np.array([0.0, 1.0])
@@ -158,7 +162,11 @@ def test_set_data_triggers_tuning_on_first_ingest() -> None:
 
 
 def test_training_covariance_matches_kernel() -> None:
-    """Covariance utility should include kernel plus noise on the diagonal."""
+    """Covariance utility should include kernel plus noise on the diagonal.
+
+    Hyperparameters are fixed (no tuning) to keep the expected matrix
+    deterministic for manual comparison.
+    """
 
     X = np.array([[0.0], [1.0]])
     gp = GaussianProcessOptimiser(
@@ -188,7 +196,11 @@ def test_training_covariance_matches_kernel() -> None:
 
 
 def test_joint_prior_covariances_blocks() -> None:
-    """joint_prior_covariances should return all four blocks explicitly."""
+    """joint_prior_covariances should return all four blocks explicitly.
+
+    Hyperparameters are fixed (no tuning) so the expected blocks remain
+    deterministic for manual comparison.
+    """
 
     X_train = np.array([[0.0], [1.0]])
     X_test = np.array([[0.5], [1.5]])
@@ -238,7 +250,11 @@ def test_joint_prior_covariances_blocks() -> None:
 
 
 def test_compute_posterior() -> None:
-    """Posterior mean/cov should match manual GP conditioning."""
+    """Posterior mean/cov should match manual GP conditioning.
+
+    Hyperparameters are fixed (no tuning) to keep the manual conditioning
+    calculation deterministic.
+    """
 
     X_train = np.array([[0.0], [1.0]])
     y_train = np.array([0.0, 1.0])
