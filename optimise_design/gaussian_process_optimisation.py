@@ -321,13 +321,36 @@ class GaussianProcessOptimiser:
         K_tt, K_tT, K_Tt, K_TT = self.joint_prior_covariances(X_test)
         # Cholesky for numerical stability.
         L = np.linalg.cholesky(K_tt + 1e-8 * np.eye(K_tt.shape[0]))
-        # α = (K_tt)^-1 y via solves.
+        # α = (K_tt)^-1 y
         alpha = np.linalg.solve(L.T, np.linalg.solve(L, self._y))
         mean = K_Tt @ alpha # @ means matrix multiplication
-        # v = L^-1 K_t*
+        # v = L^-1 K_tT
         v = np.linalg.solve(L, K_tT)
         cov = K_TT - K_Tt @ np.linalg.solve(L.T, v)
         return mean, cov
 
+    def predict(self, X_test: np.ndarray, noisy: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        """Predict posterior mean and variance at test inputs.
 
-    
+        Parameters
+        ----------
+        X_test:
+            Array of test inputs (m, d).
+        noisy:
+            If True, include observation noise σ_n² on the returned variances
+            (i.e., predictive variance for y*). If False, return the latent
+            function variance only.
+
+        Returns
+        -------
+        mean:
+            Posterior mean vector shaped (m,).
+        var:
+            Posterior variance vector shaped (m,) corresponding to the diagonal of the
+            posterior covariance; adds σ_n² if ``noisy`` is True.
+        """
+        mean, cov = self.compute_posterior(X_test)
+        var = np.diag(cov)
+        if noisy:
+            var = var + self.noise_variance
+        return mean.ravel(), var # ravel() flattens the array to 1D

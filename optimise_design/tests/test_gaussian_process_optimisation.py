@@ -292,3 +292,35 @@ def test_compute_posterior() -> None:
 
     assert np.allclose(mean, expected_mean)
     assert np.allclose(cov, expected_cov)
+
+
+def test_predict_with_and_without_noise() -> None:
+    """predict should match manual posterior mean/variance, with optional noise.
+
+    Hyperparameters are fixed (no tuning) so the manual posterior calculation
+    stays deterministic.
+    """
+
+    X_train = np.array([[0.0], [1.0]])
+    y_train = np.array([0.0, 1.0])
+    X_test = np.array([[0.25], [0.75]])
+    gp = GaussianProcessOptimiser(
+        kernel=None,
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=0.2,
+        ucb_beta=1.0,
+    )
+    gp._X = X_train
+    gp._y = y_train
+
+    mean, cov = gp.compute_posterior(X_test)
+    mean_pred, var_pred = gp.predict(X_test, noisy=False)
+    mean_pred_noisy, var_pred_noisy = gp.predict(X_test, noisy=True)
+
+    expected_var = np.diag(cov)
+    expected_var_noisy = expected_var + 0.2
+
+    assert np.allclose(mean_pred, mean.ravel())
+    assert np.allclose(var_pred, expected_var)
+    assert np.allclose(var_pred_noisy, expected_var_noisy)
