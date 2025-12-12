@@ -62,36 +62,35 @@ UCB intuition
 
 from __future__ import annotations
 
-import math
-import warnings
-from typing import Any, Callable, Optional
+from dataclasses import dataclass
+from typing import Optional, Protocol, Tuple, Any
 
 import numpy as np
 
 
-def rbf_kernel(lengthscale: float = 1.0, signal_variance: float = 1.0) -> Callable[[np.ndarray, np.ndarray], float]:
-    """Return an RBF kernel function with the given lengthscale and signal variance."""
+# ---------------------------------------------------------------------
+# Kernel abstraction
+# ---------------------------------------------------------------------
 
-    def _k(x: np.ndarray, y: np.ndarray) -> float:
-        diff = x - y
-        sqdist = float(np.dot(diff, diff))
-        return signal_variance * math.exp(-0.5 * sqdist / (lengthscale**2))
+class Kernel(Protocol):
+    """
+    Covariance kernel interface.
+    """
 
-    return _k
+    def __call__(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
+        ...
 
-
-def ucb_acquisition(beta: float = 1.0) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
-    """Return a UCB acquisition function a(x) = μ(x) + sqrt(beta) * σ(x)."""
-
-    def _a(mean: np.ndarray, var: np.ndarray) -> np.ndarray:
-        return mean + np.sqrt(beta) * np.sqrt(var)
-
-    return _a
+    def gram(self, X: np.ndarray) -> np.ndarray:
+        ...
 
 
-def kernel_matrix(X1: np.ndarray, X2: np.ndarray,
-                  kernel: Callable[[np.ndarray, np.ndarray], float]) -> np.ndarray:
-    """Build the kernel matrix K(X1, X2) using the provided kernel.
+@dataclass(frozen=True)
+class RBFKernel:
+    """
+    Squared exponential (RBF) kernel.
+
+    __call__(X1, X2) for cross-covariance, gram(X) for same-set covariance:
+    Used to build the kernel matrix K(X1, X2) using the provided kernel.
 
     Args:
         X1: Array of input points (n1, d); often training inputs.
@@ -101,20 +100,67 @@ def kernel_matrix(X1: np.ndarray, X2: np.ndarray,
     - For marginal likelihood/posterior: X1 = X2 = training inputs (_X).
     - For predictions: X1 = training inputs, X2 = test/candidate inputs.
 
-    No defaults as this is a pure function and not a default callable for a class.
-
-    We don't have to multiply by signal_variance here because the kernel function already includes it
     """
-    n1, n2 = X1.shape[0], X2.shape[0]
-    K = np.empty((n1, n2), dtype=float)
-    for i in range(n1):
-        for j in range(n2):
-            K[i, j] = kernel(X1[i], X2[j])
-    return K
+    lengthscale: float
+    signal_variance: float
+
+    def __call__(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
+        X1 = np.atleast_2d(X1)
+        X2 = np.atleast_2d(X2)
+
+        sqdist = (
+            np.sum(X1 ** 2, axis=1)[:, None]
+            + np.sum(X2 ** 2, axis=1)[None, :]
+            - 2.0 * X1 @ X2.T
+        )
+
+        return self.signal_variance * np.exp(
+            -0.5 * sqdist / (self.lengthscale ** 2)
+        )
+
+    def gram(self, X: np.ndarray) -> np.ndarray:
+        return self(X, X)
 
 
-def log_marginal_likelihood(X, y, kernel, kernel_matrix, noise_variance) -> float:
-    """Compute log p(y | X, θ) for the current data and hyperparameters.
+# ---------------------------------------------------------------------
+# Kernel tuner protocol
+# ---------------------------------------------------------------------
+
+class KernelTuner(Protocol):
+    """
+    Kernel tuner interface.
+
+    A kernel tuner takes data and a kernel, and returns a new kernel
+    instance together with a noise variance.
+
+    """
+
+    def __call__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        kernel: Kernel,
+        noise_variance: float,
+        **kwargs: Any,
+    ) -> tuple[Kernel, float]:
+        ...
+
+
+# ---------------------------------------------------------------------
+# Marginal likelihood
+# ---------------------------------------------------------------------
+
+def log_marginal_likelihood(
+    X: np.ndarray,
+    y: np.ndarray,
+    kernel: Kernel,
+    noise_variance: float,
+    jitter: float = 1e-8,
+) -> float:
+    """
+    Compute the Gaussian Process log marginal likelihood.
+
+    Compute log p(y | X, θ) for the current data and hyperparameters.
 
     This is the likelihood of the observed data where model is the GP specified by a given kernel.
     
@@ -128,29 +174,40 @@ def log_marginal_likelihood(X, y, kernel, kernel_matrix, noise_variance) -> floa
         The log marginal likelihood value.
 
     No defaults as this is a pure function and not a default callable for a class.
+
     """
-    if X is None or y is None:
-        raise ValueError("No observations to evaluate marginal likelihood.")
-    K = kernel_matrix(X, X, kernel)
-    K += noise_variance * np.eye(K.shape[0])
-    L = np.linalg.cholesky(K + 1e-8 * np.eye(K.shape[0]))
+    n = X.shape[0]
+
+    K = kernel.gram(X)
+    K = K + (noise_variance + jitter) * np.eye(n)
+
+    L = np.linalg.cholesky(K)
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
-    lml = -0.5 * float(y.T @ alpha)
-    lml -= float(np.sum(np.log(np.diag(L))))
-    lml -= 0.5 * X.shape[0] * np.log(2 * np.pi)
-    return lml
+
+    log_det = 2.0 * np.sum(np.log(np.diag(L)))
+    return -0.5 * y @ alpha - 0.5 * log_det - 0.5 * n * np.log(2.0 * np.pi)
+
+
+
+# ---------------------------------------------------------------------
+# RBF kernel tuner
+# ---------------------------------------------------------------------
 
 def rbf_tuner(
     X: np.ndarray,
     y: np.ndarray,
-    initial_lengthscale: float = 1.0,
-    initial_signal_variance: float = 1.0,
-    initial_noise_variance: float = 1.0,
-    bounds: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = None,
+    kernel: Kernel,
+    noise_variance: float,
+    bounds: Optional[
+        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
+    ] = None,
     method: str = "L-BFGS-B",
     optimizer_options: Optional[dict[str, Any]] = None,
-) -> tuple[Callable[[np.ndarray, np.ndarray], float], float]:
-    """Tune (lengthscale, signal_variance, noise_variance) via maximising log marginal likelihood.
+) -> tuple[Kernel, float]:
+    """
+    Tune RBF kernel hyperparameters via marginal likelihood maximisation.
+
+    Tune (lengthscale, signal_variance, noise_variance) via maximising log marginal likelihood.
 
     The likelihood of the data given the model is low if the hyperparameters are poorly chosen.
     This method optimises the hyperparameters by tuning them to maximise the log marginal likelihood.
@@ -161,42 +218,70 @@ def rbf_tuner(
     believe the data distribution has drifted.
 
     Uses scipy.optimize.minimize with a default L-BFGS-B optimiser. Parameters
-    are optimised in log-space to enforce positivity. If scipy is unavailable,
-    an ImportError is raised.
+    are optimised in log-space to enforce positivity.
+
     """
     from scipy.optimize import minimize
 
-    if X is None or y is None:
-        raise ValueError("No observations to tune hyperparameters.")
+    if not isinstance(kernel, RBFKernel):
+        raise TypeError("rbf_tuner requires an RBFKernel.")
 
-    x0 = (initial_lengthscale, initial_signal_variance, initial_noise_variance)
-    log_x0 = np.log(np.array(x0, dtype=float))
+    x0 = np.log(
+        np.array(
+            [
+                kernel.lengthscale,
+                kernel.signal_variance,
+                noise_variance,
+            ],
+            dtype=float,
+        )
+    )
+
+    # --- validate bounds (once, before optimisation)
+    if bounds is not None:
+        for lo, hi in bounds:
+            if lo <= 0.0 or hi <= 0.0 or lo >= hi:
+                raise ValueError(
+                    "Bounds must satisfy 0 < lower < upper for all hyperparameters."
+                )
+        log_bounds = [(np.log(lo), np.log(hi)) for lo, hi in bounds]
+    else:
+        log_bounds = None
+
 
     def objective(log_params: np.ndarray) -> float:
         l, s, n = np.exp(log_params)
-        kernel = rbf_kernel(l, s)
-        noise_variance = n
-        return -log_marginal_likelihood(X, y, kernel, kernel_matrix, noise_variance)
+        return -log_marginal_likelihood(X, y, RBFKernel(l, s), n)
+
 
     opt = minimize(
         objective,
-        log_x0,
+        x0,
         method=method,
-        bounds=[(np.log(b[0]), np.log(b[1])) for b in bounds] if bounds else None,
+        bounds=log_bounds,
         options=optimizer_options,
     )
-    # Update with optimised values.
+
+    # --- handle optimiser failure explicitly
+    if not opt.success:
+        # Conservative fallback: keep previous hyperparameters
+        return kernel, float(noise_variance)
+
     l_opt, s_opt, n_opt = np.exp(opt.x)
-    kernel = rbf_kernel(l_opt, s_opt)
-    noise_variance = float(n_opt)
-    return kernel, noise_variance
+    return RBFKernel(l_opt, s_opt), float(n_opt)
 
 
 
 
+# ---------------------------------------------------------------------
+# Gaussian Process regressor
+# ---------------------------------------------------------------------
 
 class GaussianProcessOptimiser:
-    """Minimal GP-based Bayesian optimiser with a UCB acquisition.
+    """
+    Gaussian Process regressor with optional hyperparameter tuning.
+
+    Minimal GP-based Bayesian optimiser with a UCB acquisition.
 
     Parameters
     ----------
@@ -213,25 +298,19 @@ class GaussianProcessOptimiser:
     That is, we assume the latent function is drawn from a Gaussian Process with mean 0 and kernel k_θ.
     For the default RBF kernel θ = (lengthscale, signal_variance, noise_variance) where the first two belong to the 
     kernel and the last is the GP noise term. All three are tuned from data.
+
     """
 
     def __init__(
         self,
+        kernel: Kernel,
         noise_variance: float,
-        kernel_tuner: Callable[..., tuple[Callable[[np.ndarray, np.ndarray], float], float]],
-        kernel: Optional[Callable[[np.ndarray, np.ndarray], float]] = None,
-        acquisition_fn: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
-    ) -> None:
-
+        kernel_tuner: Optional[KernelTuner] = None,
+    ):
+        self.kernel = kernel
         self.noise_variance = noise_variance
-        # Default acquisition: UCB with β=1.0 if none provided.
-        self.acquisition_fn = acquisition_fn or ucb_acquisition(beta=1.0)
-        # Default kernel: RBF with unit lengthscale/signal variance.
-        self.kernel = kernel or rbf_kernel(lengthscale=1.0, signal_variance=1.0)
-        # Default hyperparameter tuner: log-marginal-likelihood maximiser for RBF.
-        self.kernel_tuner = kernel_tuner or rbf_tuner
+        self.kernel_tuner = kernel_tuner
 
-        # Lazy storage for training inputs/outputs; populated when observations are added.
         self._X: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
 
@@ -240,9 +319,10 @@ class GaussianProcessOptimiser:
         X: np.ndarray,
         y: np.ndarray,
         tune: bool = True,
-        tune_kwargs: Optional[dict[str, Any]] = None,
+        tuner_options: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Set training data and optionally tune hyperparameters.
+        """
+        Set training data and optionally tune hyperparameters.
 
         Parameters
         ----------
@@ -251,169 +331,65 @@ class GaussianProcessOptimiser:
         y:
             Training targets (n,).
         tune:
-            If True (default), call :meth:`tune_hyperparameters` after each 
-            data ingestion so later covariance/posterior calls use the latest 
-            tuned hyperparameters θ.
+            If True (default), tune kernel hyperparameters using the provided
+            kernel tuner.
 
-            Set to False if you wish to keep existing hyperparameters (e.g., you already
-            tuned once and do not want to re-tune right now).
+        tuner_options:
+            Optional dictionary of keyword arguments to pass to the kernel
+            tuner.
 
-        tune_kwargs:
-            Optional keyword arguments forwarded to :meth:`tune_hyperparameters`
-            (e.g., bounds, optimizer options).
-
-        Example
-        -------
-        To run the default L-BFGS-B tuner with bounds (including a noise floor)
-        and custom optimiser options:
-
-        >>> gp.set_data(
-        ...     X, y,
-        ...     tune_kwargs={
-        ...         "bounds": (
-        ...             (1e-2, 10.0),   # lengthscale ℓ
-        ...             (1e-3, 10.0),   # signal variance σ_f²
-        ...             (1e-4, 1.0),    # noise variance σ_n² (noise floor via lower bound)
-        ...         ),
-        ...         "optimizer_options": {"maxiter": 100, "gtol": 1e-6},
-        ...     },
-        ... )
         """
-        first_ingest = self._X is None
-        self._X = np.asarray(X, dtype=float)
-        self._y = np.asarray(y, dtype=float)
+        X = np.asarray(X)
+        y = np.asarray(y).reshape(-1)
 
-        # Always tune on first ingestion to avoid accidentally running with
-        # untuned hyperparameters. If the caller explicitly disables tuning on
-        # the first ingestion, warn in case this was unintentional. On subsequent
-        # ingestions, caller may skip tuning by setting tune=False.
-        if first_ingest and not tune:
-            warnings.warn(
-                "First data ingestion did not tune GP kernel hyperparameters; proceeding with existing "
-                "values without tuning. Set tune=True (default) to optimise them from data.",
-                UserWarning,
-            )
-        if first_ingest and self._X.shape[0] < 20:
-            warnings.warn(
-                "First data ingestion has fewer than 20 points; hyperparameter tuning may be unstable. "
-                "Consider supplying a larger initial batch or setting hyperparameter bounds and noise floor.",
-                UserWarning,
-            )
-        if first_ingest or tune:
+        self._X = X
+        self._y = y
+
+        if tune:
             if self.kernel_tuner is None:
-                raise ValueError("No kernel tuner available; supply one or use the default RBF.")
-            new_kernel, new_noise = self.kernel_tuner(self._X, self._y, **(tune_kwargs or {}))
-            self.kernel = new_kernel
-            self.noise_variance = new_noise
+                raise RuntimeError("No kernel tuner provided.")
 
+            kernel, noise = self.kernel_tuner(
+                X,
+                y,
+                self.kernel,
+                self.noise_variance,
+                **(tuner_options or {}),
+            )
+            self.kernel = kernel
+            self.noise_variance = noise
 
-
-
-
-    def training_covariance(self) -> np.ndarray:
-        """Return K(X, X) + σ_n² I for the current data."""
-        if self._X is None:
-            raise ValueError("No training inputs available.")
-        K = kernel_matrix(self._X, self._X, self.kernel)
-        return K + self.noise_variance * np.eye(K.shape[0])
-
-    def joint_prior_covariances(
-        self, X_test: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return (K_train_train, K_train_test, K_test_train, K_test_test)."""
-        if self._X is None:
-            raise ValueError("No training inputs available.")
-
-        # Train/train block with observation noise on the diagonal.
-        K_train_train = kernel_matrix(self._X, self._X, self.kernel)
-        K_train_train = K_train_train + self.noise_variance * np.eye(K_train_train.shape[0])
-
-        # Cross-covariance blocks and test/test block from the tuned kernel.
-        K_train_test = kernel_matrix(self._X, X_test, self.kernel)
-        K_test_train = kernel_matrix(X_test, self._X, self.kernel)
-        K_test_test = kernel_matrix(X_test, X_test, self.kernel)
-        return K_train_train, K_train_test, K_test_train, K_test_test
-
-    def compute_posterior(self, X_test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Compute GP posterior mean/covariance at X_test given current data.
-
-        Uses the closed-form conditioning formulas with t=train, T=test:
-            μ_T = K_Tt (K_tt)^-1 y
-            Σ_T = K_TT - K_Tt (K_tt)^-1 K_tT
-        where K_tt includes the observation noise term.
-        """
-        if self._X is None or self._y is None:
-            raise ValueError("No observations to condition on.")
-
-        K_tt, K_tT, K_Tt, K_TT = self.joint_prior_covariances(X_test)
-        # Cholesky for numerical stability.
-        L = np.linalg.cholesky(K_tt + 1e-8 * np.eye(K_tt.shape[0]))
-        # α = (K_tt)^-1 y
-        alpha = np.linalg.solve(L.T, np.linalg.solve(L, self._y))
-        mean = K_Tt @ alpha # @ means matrix multiplication
-        # v = L^-1 K_tT
-        v = np.linalg.solve(L, K_tT)
-        cov = K_TT - K_Tt @ np.linalg.solve(L.T, v)
-        return mean, cov
-
-    def predict(self, X_test: np.ndarray, noisy: bool = False) -> tuple[np.ndarray, np.ndarray]:
-        """Predict posterior mean and variance at test inputs.
-
-        Parameters
-        ----------
-        X_test:
-            Array of test inputs (m, d).
-        noisy:
-            If True, include observation noise σ_n² on the returned variances
-            (i.e., predictive variance for y*). If False, return the latent
-            function variance only.
-
-        Returns
-        -------
-        mean:
-            Posterior mean vector shaped (m,).
-        var:
-            Posterior variance vector shaped (m,) corresponding to the diagonal of the
-            posterior covariance; adds σ_n² if ``noisy`` is True.
-        """
-        mean, cov = self.compute_posterior(X_test)
-        var = np.diag(cov)
-        if noisy:
-            var = var + self.noise_variance
-        return mean.ravel(), var # ravel() flattens the array to 1D
-
-
-
-    def acquire_next(
+    def predict(
         self,
-        X_candidates: np.ndarray,
-        acquisition: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
+        X_star: np.ndarray,
+        noisy: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Acquires the next point in the input / design space to evaluate.
-        
-        Score candidate designs and return the best according to an acquisition.
-
-        
-        Parameters
-        ----------
-        X_candidates:
-            Candidate test inputs (m, d) to evaluate.
-        acquisition:
-            Optional callable taking ``(mean, var)`` arrays and returning an
-            acquisition score per candidate. Defaults to the optimiser's
-            ``acquisition_fn``; if neither is set, an error is raised.
-
-        Returns
-        -------
-        best_x:
-            The candidate (d,) with the highest acquisition score.
-        scores:
-            Acquisition scores for all candidates (m,).
         """
-        mean, var = self.predict(X_candidates, noisy=False)
-        acq_fn = acquisition or self.acquisition_fn
-        if acq_fn is None:
-            raise ValueError("No acquisition function provided.")
-        scores = acq_fn(mean, var)
-        best_idx = int(np.argmax(scores))
-        return X_candidates[best_idx], scores
+        Predict posterior mean and marginal variance.
+        """
+        X_star = np.atleast_2d(X_star)
+
+        if self._X is None or self._y is None:
+            raise ValueError("No training data set.")
+
+        X, y = self._X, self._y
+
+        K = self.kernel.gram(X)
+        K += (self.noise_variance + 1e-8) * np.eye(len(X)) # jitter for stability
+        L = np.linalg.cholesky(K)
+
+        K_star = self.kernel(X, X_star)
+        alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+
+        mean = K_star.T @ alpha
+
+        v = np.linalg.solve(L, K_star)
+        var = self.kernel.gram(X_star) - v.T @ v # may produce small negative values on diagonal due to float precision issues
+
+        if noisy:
+            var += self.noise_variance * np.eye(len(X_star))
+
+        diag = np.diag(var)
+        diag = np.maximum(diag, 0.0) # ensure non-negative variance produced due to float precision issues zeroed
+        return mean.reshape(-1), diag
+
