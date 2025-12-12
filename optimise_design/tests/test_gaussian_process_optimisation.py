@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from optimise_design.gaussian_process_optimisation import rbf_kernel
+from optimise_design.gaussian_process_optimisation import (
+    GaussianProcessOptimiser,
+    rbf_kernel,
+)
 
 
 def test_rbf_kernel_computes_expected_value() -> None:
@@ -16,3 +19,43 @@ def test_rbf_kernel_computes_expected_value() -> None:
     expected = float(np.exp(-0.5 * sqdist / (2.0**2)))
 
     assert abs(kernel(x, y) - expected) < 1e-12
+
+
+def test_log_marginal_likelihood_runs() -> None:
+    """log_marginal_likelihood should match a hand-computed value."""
+
+    X = np.array([[0.0], [1.0]])
+    y = np.array([0.0, 1.0])
+    gp = GaussianProcessOptimiser(
+        kernel=None,  # use default RBF
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=1e-2,
+        ucb_beta=1.0,
+    )
+    gp._X = X
+    gp._y = y
+    val = gp.log_marginal_likelihood()
+
+    # Hand-compute the same quantity: K = k(X,X) + σ_n² I, then use the standard
+    # GP log marginal likelihood formula.
+    def k(x: np.ndarray, z: np.ndarray) -> float:
+        diff = x - z
+        return float(np.exp(-0.5 * np.dot(diff, diff)))
+
+    K = np.array(
+        [
+            [k(X[0], X[0]), k(X[0], X[1])],
+            [k(X[1], X[0]), k(X[1], X[1])],
+        ],
+        dtype=float,
+    )
+    K += 1e-2 * np.eye(2)
+    L = np.linalg.cholesky(K + 1e-8 * np.eye(2))
+    alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+    expected = -0.5 * float(y.T @ alpha)
+    expected -= float(np.sum(np.log(np.diag(L))))
+    expected -= 0.5 * X.shape[0] * np.log(2 * np.pi)
+
+    assert np.isfinite(val)
+    assert abs(val - expected) < 1e-6

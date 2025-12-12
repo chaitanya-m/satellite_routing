@@ -13,6 +13,7 @@ Kernel hyperparameters and marginal likelihood
 ----------------------------------------------
 - Tune θ by maximising the GP marginal likelihood (closed-form Gaussian
   integral):
+    p(y | X, θ) = ∫ p(y | f) p(f | X, θ) df
     log p(y | X, θ) = -0.5 yᵀ (K_θ + σ_n² I)⁻¹ y
                       -0.5 log det(K_θ + σ_n² I)
                       -0.5 n log 2π
@@ -136,3 +137,29 @@ class GaussianProcessOptimiser:
             for j in range(n2):
                 K[i, j] = self.signal_variance * self.kernel(X1[i], X2[j])
         return K
+
+    def log_marginal_likelihood(self) -> float:
+        """Compute log p(y | X, θ) for the current data and hyperparameters.
+
+        This is the likelihood of the observed data where model is the GP specified by a given kernel.
+        
+        The marginal likelihood is given by:
+        p(y | X, θ) = ∫ p(y | f) p(f | X, θ) df
+        
+        But the latent function f is integrated out, and we are left with a simple closed-form expression:
+        log p(y | X, θ) = -0.5 yᵀ (K_θ + σ_n² I)⁻¹  -0.5 log det(K_θ + σ_n² -0.5 n log 2π
+ 
+        Returns:
+            The log marginal likelihood value.
+
+        """
+        if self._X is None or self._y is None:
+            raise ValueError("No observations to evaluate marginal likelihood.")
+        K = self._kernel_matrix(self._X, self._X)
+        K += self.noise_variance * np.eye(K.shape[0])
+        L = np.linalg.cholesky(K + 1e-8 * np.eye(K.shape[0]))
+        alpha = np.linalg.solve(L.T, np.linalg.solve(L, self._y))
+        lml = -0.5 * float(self._y.T @ alpha)
+        lml -= float(np.sum(np.log(np.diag(L))))
+        lml -= 0.5 * self._X.shape[0] * np.log(2 * np.pi)
+        return lml
