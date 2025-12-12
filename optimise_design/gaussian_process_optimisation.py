@@ -314,9 +314,13 @@ class GaussianProcessOptimiser:
         self._y: Optional[np.ndarray] = None
 
 
-        self._L: Optional[np.ndarray] = None
-        self._alpha: Optional[np.ndarray] = None
+        # ------------------------------------------------------------
+        # Posterior cache (training-dependent quantities)
+        # ------------------------------------------------------------
+        self._L: Optional[np.ndarray] = None        # Cholesky factor of K + σ_n² I
+        self._alpha: Optional[np.ndarray] = None    # (K + σ_n² I)^{-1} y
         self._cache_valid: bool = False
+
 
 
     def set_data(
@@ -368,17 +372,42 @@ class GaussianProcessOptimiser:
 
 
     def _ensure_posterior_cache(self) -> None:
+        """
+        Ensure that posterior quantities depending only on training data
+        (Cholesky factor and alpha vector) are computed and cached.
+        """
         if self._cache_valid:
             return
 
-        X, y = self._X, self._y
-        assert X is not None and y is not None
+        if self._X is None or self._y is None:
+            raise ValueError("No training data set.")
 
+        X = self._X
+        y = self._y
+
+        # ============================================================
+        # Build training covariance matrix
+        # ============================================================
+
+        # K = K(X, X): covariance between all training points
         K = self.kernel.gram(X)
+
+        # Add observation noise and jitter for numerical stability
         K += (self.noise_variance + 1e-8) * np.eye(len(X))
 
+        # ============================================================
+        # Factorise and solve
+        # ============================================================
+
+        # Cholesky factorisation: K = L L^T
         L = np.linalg.cholesky(K)
+
+        # alpha = (K + σ_n^2 I)^{-1} y
         alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+
+        # ============================================================
+        # Cache results
+        # ============================================================
 
         self._L = L
         self._alpha = alpha
@@ -399,27 +428,19 @@ class GaussianProcessOptimiser:
         if self._X is None or self._y is None:
             raise ValueError("No training data set.")
 
-        # Training data
-        X = self._X            # training inputs (n_train, d)
-        y = self._y            # training targets (n_train,)
-
         # ============================================================
-        # Build training covariance and solve for posterior coefficients
+        # Reload posterior cache (training-dependent quantities)
         # ============================================================
 
-        # K = K(X, X): covariance between all training points
-        K = self.kernel.gram(X)
+        self._ensure_posterior_cache()
 
-        # Add observation noise and a small jitter term for numerical stability
-        K += (self.noise_variance + 1e-8) * np.eye(len(X))
+        # Cached quantities
+        L = self._L            # Cholesky factor of K + σ_n² I
+        alpha = self._alpha    # (K + σ_n² I)^{-1} y
 
-        # Cholesky factorisation: K = L L^T
-        # L is lower triangular and used for efficient solves
-        L = np.linalg.cholesky(K)
+        assert L is not None and alpha is not None
 
-        # Solve (K + σ_n^2 I)^{-1} y using two triangular solves
-        # alpha = (K + σ_n^2 I)^{-1} y
-        alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+        X = self._X            # training inputs
 
         # ============================================================
         # Posterior mean at test points
@@ -455,4 +476,3 @@ class GaussianProcessOptimiser:
         diag = np.maximum(diag, 0.0)
 
         return mean.reshape(-1), diag
-
