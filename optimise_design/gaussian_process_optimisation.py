@@ -145,7 +145,6 @@ class KernelTuner(Protocol):
     ) -> tuple[Kernel, float]:
         ...
 
-
 # ---------------------------------------------------------------------
 # Marginal likelihood
 # ---------------------------------------------------------------------
@@ -198,11 +197,11 @@ def rbf_tuner(
     y: np.ndarray,
     kernel: Kernel,
     noise_variance: float,
-    bounds: Optional[
-        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
-    ] = None,
+    *,
+    bounds: Optional[Tuple[Tuple[float, float], ...]] = None,
     method: str = "L-BFGS-B",
     optimizer_options: Optional[dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> tuple[Kernel, float]:
     """
     Tune RBF kernel hyperparameters via marginal likelihood maximisation.
