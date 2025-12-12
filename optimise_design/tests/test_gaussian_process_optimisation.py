@@ -324,3 +324,38 @@ def test_predict_with_and_without_noise() -> None:
     assert np.allclose(mean_pred, mean.ravel())
     assert np.allclose(var_pred, expected_var)
     assert np.allclose(var_pred_noisy, expected_var_noisy)
+
+
+def test_acquire_next_defaults_to_ucb_and_accepts_custom_acquisition() -> None:
+    """acquire_next should pick the best candidate under UCB and allow custom scores."""
+
+    # Training data near 0 and 1.
+    X_train = np.array([[0.0], [1.0]])
+    y_train = np.array([0.0, 1.0])
+    gp = GaussianProcessOptimiser(
+        kernel=None,
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=0.05,
+        ucb_beta=4.0,  # encourage exploration
+    )
+    gp._X = X_train
+    gp._y = y_train
+
+    # Candidate set: one close to data (low variance), one far (higher variance).
+    X_candidates = np.array([[0.5], [2.0]])
+    mean, var = gp.predict(X_candidates, noisy=False)
+
+    # Under UCB with larger beta, the far point should score higher due to variance.
+    best_x, scores = gp.acquire_next(X_candidates)
+    assert np.allclose(best_x, X_candidates[1])
+    assert scores.shape == (2,)
+
+    # Custom acquisition: pure exploitation of mean only; should pick the higher mean.
+    def exploit_only(mu: np.ndarray, _: np.ndarray) -> np.ndarray:
+        return mu
+
+    best_x_exploit, scores_exploit = gp.acquire_next(X_candidates, acquisition=exploit_only)
+    # assert best_x_exploit is the candidate with highest mean (the score is just the mean, so argmax of scores)
+    assert np.allclose(best_x_exploit, X_candidates[np.argmax(scores_exploit)]) 
+

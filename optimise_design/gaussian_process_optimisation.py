@@ -354,3 +354,43 @@ class GaussianProcessOptimiser:
         if noisy:
             var = var + self.noise_variance
         return mean.ravel(), var # ravel() flattens the array to 1D
+
+
+
+    def acquire_next(
+        self,
+        X_candidates: np.ndarray,
+        acquisition: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
+        ucb_beta: Optional[float] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Acquires the next point in the input / design space to evaluate.
+        
+        Score candidate designs and return the best according to an acquisition.
+
+        
+        Parameters
+        ----------
+        X_candidates:
+            Candidate test inputs (m, d) to evaluate.
+        acquisition:
+            Optional callable taking ``(mean, var)`` arrays and returning an
+            acquisition score per candidate. Defaults to UCB.
+        ucb_beta:
+            Optional override for the UCB exploration weight β; defaults to
+            ``self.ucb_beta`` when ``acquisition`` is not provided.
+
+        Returns
+        -------
+        best_x:
+            The candidate (d,) with the highest acquisition score.
+        scores:
+            Acquisition scores for all candidates (m,).
+        """
+        mean, var = self.predict(X_candidates, noisy=False)
+        if acquisition is None:
+            beta = self.ucb_beta if ucb_beta is None else ucb_beta
+            scores = mean + np.sqrt(beta) * np.sqrt(var)
+        else:
+            scores = acquisition(mean, var)
+        best_idx = int(np.argmax(scores))
+        return X_candidates[best_idx], scores
