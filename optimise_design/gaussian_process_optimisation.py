@@ -105,3 +105,21 @@ class GaussianProcessOptimiser:
         # Lazy storage for training inputs/outputs; populated when observations are added.
         self._X: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
+
+    def _kernel_matrix(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
+        """Build the kernel matrix K(X1, X2) using the provided kernel.
+
+        Args:
+            X1: Array of input points (n1, d); often training inputs.
+            X2: Array of input points (n2, d); often training or test inputs.
+
+        Typically:
+        - For marginal likelihood/posterior: X1 = X2 = training inputs (_X).
+        - For predictions: X1 = training inputs, X2 = test/candidate inputs.
+        """
+        n1, n2 = X1.shape[0], X2.shape[0]
+        K = np.empty((n1, n2), dtype=float)
+        for i in range(n1):
+            for j in range(n2):
+                K[i, j] = self.signal_variance * self.kernel(X1[i], X2[j])
+        return K
