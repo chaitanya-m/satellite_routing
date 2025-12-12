@@ -236,3 +236,28 @@ class GaussianProcessOptimiser:
         K_test_train = self._kernel_matrix(X_test, self._X)
         K_test_test = self._kernel_matrix(X_test, X_test)
         return K_train_train, K_train_test, K_test_train, K_test_test
+
+    def compute_posterior(self, X_test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Compute GP posterior mean/covariance at X_test given current data.
+
+        Uses the closed-form conditioning formulas with t=train, T=test:
+            μ_T = K_Tt (K_tt)^-1 y
+            Σ_T = K_TT - K_Tt (K_tt)^-1 K_tT
+        where K_tt includes the observation noise term.
+        """
+        if self._X is None or self._y is None:
+            raise ValueError("No observations to condition on.")
+
+        K_tt, K_tT, K_Tt, K_TT = self.joint_prior_covariances(X_test)
+        # Cholesky for numerical stability.
+        L = np.linalg.cholesky(K_tt + 1e-8 * np.eye(K_tt.shape[0]))
+        # α = (K_tt)^-1 y via solves.
+        alpha = np.linalg.solve(L.T, np.linalg.solve(L, self._y))
+        mean = K_Tt @ alpha # @ means matrix multiplication
+        # v = L^-1 K_t*
+        v = np.linalg.solve(L, K_tT)
+        cov = K_TT - K_Tt @ np.linalg.solve(L.T, v)
+        return mean, cov
+    
+    
+

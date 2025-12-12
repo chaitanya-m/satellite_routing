@@ -193,3 +193,44 @@ def test_joint_prior_covariances_blocks() -> None:
     assert np.allclose(K_tT, expected_tT)
     assert np.allclose(K_Tt, expected_Tt)
     assert np.allclose(K_TT, expected_TT)
+
+
+def test_compute_posterior() -> None:
+    """Posterior mean/cov should match manual GP conditioning."""
+
+    X_train = np.array([[0.0], [1.0]])
+    y_train = np.array([0.0, 1.0])
+    X_test = np.array([[0.5]])
+    gp = GaussianProcessOptimiser(
+        kernel=None,
+        lengthscale=1.0,
+        signal_variance=1.0,
+        noise_variance=0.1,
+        ucb_beta=1.0,
+    )
+    gp._X = X_train
+    gp._y = y_train
+
+    mean, cov = gp.compute_posterior(X_test)
+
+    # Manual conditioning.
+    def k(x: np.ndarray, z: np.ndarray) -> float:
+        diff = x - z
+        return float(np.exp(-0.5 * np.dot(diff, diff)))
+
+    K = np.array(
+        [
+            [k(X_train[0], X_train[0]), k(X_train[0], X_train[1])],
+            [k(X_train[1], X_train[0]), k(X_train[1], X_train[1])],
+        ]
+    )
+    K += 0.1 * np.eye(2)
+    k_star = np.array([[k(X_train[0], X_test[0])], [k(X_train[1], X_test[0])]])
+    k_star_star = np.array([[k(X_test[0], X_test[0])]])
+
+    K_inv = np.linalg.inv(K)
+    expected_mean = k_star.T @ K_inv @ y_train
+    expected_cov = k_star_star - k_star.T @ K_inv @ k_star
+
+    assert np.allclose(mean, expected_mean)
+    assert np.allclose(cov, expected_cov)
