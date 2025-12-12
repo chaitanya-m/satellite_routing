@@ -61,9 +61,21 @@ UCB intuition
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Optional
 
 import numpy as np
+
+
+def rbf_kernel(lengthscale: float) -> Callable[[np.ndarray, np.ndarray], float]:
+    """Return an RBF kernel function with the given lengthscale."""
+
+    def _k(x: np.ndarray, y: np.ndarray) -> float:
+        diff = x - y
+        sqdist = float(np.dot(diff, diff))
+        return math.exp(-0.5 * sqdist / (lengthscale**2))
+
+    return _k
 
 
 class GaussianProcessOptimiser:
@@ -71,16 +83,17 @@ class GaussianProcessOptimiser:
 
     Parameters
     ----------
-    kernel:
-        Positive-definite kernel function k(x, x') (e.g., RBF).
-    lengthscale:
-        Kernel lengthscale ℓ (used by many stationary kernels).
-    signal_variance:
-        Kernel signal variance σ_f².
     noise_variance:
         Observation noise variance σ_n² used in the GP likelihood.
     ucb_beta:
         UCB exploration weight β; larger values emphasise exploration.
+    kernel:
+        Positive-definite kernel function k(x, x') (e.g., RBF). Defaults to an
+        RBF with the provided lengthscale if not supplied.
+    lengthscale:
+        Kernel lengthscale ℓ (used by many stationary kernels).
+    signal_variance:
+        Kernel signal variance σ_f².
 
     Before observing any data, we assume f ∼ GP(0, k_θ )
     That is, we assume the latent function is drawn from a Gaussian Process with mean 0 and kernel k_θ.
@@ -89,18 +102,18 @@ class GaussianProcessOptimiser:
 
     def __init__(
         self,
-        kernel: Callable[[np.ndarray, np.ndarray], float],
-        lengthscale: float,
-        signal_variance: float,
         noise_variance: float,
         ucb_beta: float,
+        kernel: Optional[Callable[[np.ndarray, np.ndarray], float]] = None,
+        lengthscale: float = 1.0,
+        signal_variance: float = 1.0,
     ) -> None:
-        
-        self.kernel = kernel
-        self.lengthscale = lengthscale
-        self.signal_variance = signal_variance
+
         self.noise_variance = noise_variance
         self.ucb_beta = ucb_beta
+        self.kernel = kernel or rbf_kernel(lengthscale)
+        self.lengthscale = lengthscale
+        self.signal_variance = signal_variance
 
         # Lazy storage for training inputs/outputs; populated when observations are added.
         self._X: Optional[np.ndarray] = None
