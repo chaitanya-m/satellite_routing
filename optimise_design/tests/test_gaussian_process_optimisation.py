@@ -115,6 +115,48 @@ def test_tune_hyperparameters_across_many_seeds() -> None:
         assert tuned > initial
 
 
+def test_set_data_triggers_tuning_on_first_ingest() -> None:
+    """set_data should tune on first ingestion so log marginal likelihood improves."""
+
+    rng = np.random.default_rng(123)
+    for _ in range(10):
+        # Use at least 20 points to avoid the small-data warning.
+        X = rng.uniform(-1.0, 1.0, size=(20, 1))
+        y = rng.normal(size=20)
+
+        # Baseline GP with deliberately non-ideal hyperparameters.
+        gp_baseline = GaussianProcessOptimiser(
+            kernel=None,
+            lengthscale=3.0,
+            signal_variance=0.2,
+            noise_variance=0.8,
+            ucb_beta=1.0,
+        )
+        gp_baseline._X = X
+        gp_baseline._y = y
+        baseline_lml = gp_baseline.log_marginal_likelihood()
+
+        # Same starting point, but use set_data (which tunes on first ingest).
+        gp = GaussianProcessOptimiser(
+            kernel=None,
+            lengthscale=3.0,
+            signal_variance=0.2,
+            noise_variance=0.8,
+            ucb_beta=1.0,
+        )
+        gp.set_data(
+            X,
+            y,
+            tune_kwargs={
+                "bounds": ((0.1, 5.0), (0.1, 5.0), (1e-4, 2.0)),
+                "optimizer_options": {"maxiter": 20},
+            },
+        )
+        tuned_lml = gp.log_marginal_likelihood()
+
+        assert tuned_lml >= baseline_lml
+
+
 def test_training_covariance_matches_kernel() -> None:
     """Covariance utility should include kernel plus noise on the diagonal."""
 

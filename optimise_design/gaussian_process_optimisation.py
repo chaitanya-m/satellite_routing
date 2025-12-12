@@ -63,6 +63,7 @@ UCB intuition
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -119,6 +120,73 @@ class GaussianProcessOptimiser:
         # Lazy storage for training inputs/outputs; populated when observations are added.
         self._X: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
+
+    def set_data(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        tune: bool = True,
+        tune_kwargs: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Set training data and optionally tune hyperparameters.
+
+        Parameters
+        ----------
+        X:
+            Training inputs (n, d).
+        y:
+            Training targets (n,).
+        tune:
+            If True (default), call :meth:`tune_hyperparameters` after each 
+            data ingestion so later covariance/posterior calls use the latest 
+            tuned hyperparameters θ.
+
+            Set to False if you wish to keep existing hyperparameters (e.g., you already
+            tuned once and do not want to re-tune right now).
+
+        tune_kwargs:
+            Optional keyword arguments forwarded to :meth:`tune_hyperparameters`
+            (e.g., bounds, optimizer options).
+
+        Example
+        -------
+        To run the default L-BFGS-B tuner with bounds (including a noise floor)
+        and custom optimiser options:
+
+        >>> gp.set_data(
+        ...     X, y,
+        ...     tune_kwargs={
+        ...         "bounds": (
+        ...             (1e-2, 10.0),   # lengthscale ℓ
+        ...             (1e-3, 10.0),   # signal variance σ_f²
+        ...             (1e-4, 1.0),    # noise variance σ_n² (noise floor via lower bound)
+        ...         ),
+        ...         "optimizer_options": {"maxiter": 100, "gtol": 1e-6},
+        ...     },
+        ... )
+        """
+        first_ingest = self._X is None
+        self._X = np.asarray(X, dtype=float)
+        self._y = np.asarray(y, dtype=float)
+
+        # Always tune on first ingestion to avoid accidentally running with
+        # untuned hyperparameters. If the caller explicitly disables tuning on
+        # the first ingestion, warn in case this was unintentional. On subsequent
+        # ingestions, caller may skip tuning by setting tune=False.
+        if first_ingest and not tune:
+            warnings.warn(
+                "First data ingestion did not tune GP kernel hyperparameters; proceeding with existing "
+                "values without tuning. Set tune=True (default) to optimise them from data.",
+                UserWarning,
+            )
+        if first_ingest and self._X.shape[0] < 20:
+            warnings.warn(
+                "First data ingestion has fewer than 20 points; hyperparameter tuning may be unstable. "
+                "Consider supplying a larger initial batch or setting hyperparameter bounds and noise floor.",
+                UserWarning,
+            )
+        if first_ingest or tune:
+            self.tune_hyperparameters(**(tune_kwargs or {}))
 
     def _kernel_matrix(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
         """Build the kernel matrix K(X1, X2) using the provided kernel.
@@ -177,7 +245,9 @@ class GaussianProcessOptimiser:
         This method optimises the hyperparameters by tuning them to maximise the log marginal likelihood.
 
         This is one of the advantages of Gaussian Processes: we can learn the hyperparameters from data
-        rather than having to set them manually.
+        rather than having to set them manually. All covariance/prediction utilities then use the
+        *current* hyperparameters; you can call this once and keep them fixed, or re-run it later if you
+        believe the data distribution has drifted.
 
         Uses scipy.optimize.minimize with a default L-BFGS-B optimiser. Parameters
         are optimised in log-space to enforce positivity. If scipy is unavailable,
@@ -258,6 +328,6 @@ class GaussianProcessOptimiser:
         v = np.linalg.solve(L, K_tT)
         cov = K_TT - K_Tt @ np.linalg.solve(L.T, v)
         return mean, cov
-    
-    
 
+
+    
