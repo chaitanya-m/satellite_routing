@@ -1,0 +1,20 @@
+
+name: cuda
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+
+dependencies:
+  - python>=3.10
+  - pytorch
+  - pytorch-cuda=12.1
+  - gpytorch
+  - botorch
+  - numpy
+  - scipy
+  - pytest
+  - pip:
+      - botorch
+

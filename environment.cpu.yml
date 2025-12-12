@@ -1,0 +1,18 @@
+name: cpu
+
+channels:
+  - pytorch
+  - conda-forge
+
+dependencies:
+  - python>=3.10
+  - pytorch
+  - gpytorch
+  - botorch
+  - numpy
+  - scipy
+  - pytest
+  - pip:
+      - botorch
+
+
