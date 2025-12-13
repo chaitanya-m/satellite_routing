@@ -2,15 +2,18 @@ import random
 import torch
 import warnings
 
-from botorch.exceptions import InputDataWarning
+from experiments.coverage import CoverageObjective
 
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
+
+from botorch.exceptions import InputDataWarning
 
 TARGET_COVERAGE = 0.95
 
 
 def test_dimensioning_2d_prefers_higher_outer_intensity():
+    experiment = CoverageObjective()
     torch.manual_seed(0)
 
     # OUTER PPP intensities (satellites)
@@ -40,19 +43,21 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
             for _ in range(num_optimiser_steps):
                 lambda_outer = optimiser.ask()
                 metrics = sim.evaluate(lambda_outer)
-                coverage = metrics["coverage"]
-                optimiser.tell(lambda_outer, coverage)
+                objective = experiment.objective(lambda_outer, metrics)
+                optimiser.tell(lambda_outer, objective)
+                experiment.on_evaluation(lambda_outer, metrics)
 
-                if coverage > 0.0:
+
+                if metrics["coverage"] > 0.0:
                     saw_nonzero_coverage = True
 
-                if coverage >= TARGET_COVERAGE:
+                if metrics["coverage"] >= TARGET_COVERAGE:
                     feasible_records.append(
                         (
                             lambda_outer,
                             metrics["n_ground"],
                             metrics["n_sats"],
-                            coverage,
+                            metrics["coverage"],
                         )
                     )
 
