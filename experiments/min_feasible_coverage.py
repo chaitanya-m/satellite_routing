@@ -1,16 +1,9 @@
 # experimental/min_feasible_coverage.py
 
 from __future__ import annotations
-from typing import Any, Dict, Literal
-import math
+from typing import Any, Dict
+
 from experiments.certificates.base import FeasibilityCertificate
-
-
-CertType = Literal[
-    "all_success",        # failure-intolerant (S = n)
-    "clopper_pearson",    # exact, failure-tolerant
-    "hoeffding",          # simple, failure-tolerant
-]
 
 
 class MinLambdaForCoverage:

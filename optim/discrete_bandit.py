@@ -59,6 +59,3 @@ class DiscreteBanditOptimiser:
             mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
             fit_gpytorch_mll(mll)
         
-
-
-

@@ -6,7 +6,7 @@ import warnings
 
 from botorch.exceptions import InputDataWarning
 
-from experiments.min_feasible_coverage import MinLambdaForCoverage, CertType
+from experiments.min_feasible_coverage import MinLambdaForCoverage
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
@@ -74,7 +74,7 @@ def run_experiment(certificate: FeasibilityCertificate) -> MinLambdaForCoverage:
             coverages = []
 
             for _ in range(evals_per_design):
-                rng = random.Random(seed)
+                rng = random.Random(seed) # on every eval, use a different seed
                 seed += 1
 
                 sim = Dimensioning_2D(
