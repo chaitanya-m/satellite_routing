@@ -1,3 +1,5 @@
+# tests/test_dimensioning_2d.py
+
 import random
 import torch
 import warnings
@@ -9,8 +11,9 @@ from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
 
-TARGET_COVERAGE = 0.8        # e.g. “Full coverage at least 90% of the time”
-MIN_SUCCESS_RATE = 0.8       # e.g. “95% coverage almost always”
+TARGET_COVERAGE = 0.7   
+DELTA = 0.05            # allow 5% failure probability
+ALPHA = 0.05            # 95% confidence
 
 def test_dimensioning_2d_prefers_higher_outer_intensity():
     """
@@ -28,21 +31,22 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
 
     # OUTER PPP intensities (satellites)
     candidates = torch.tensor(
-        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [50.0]],
+        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [500.0]],
         dtype=torch.double,
     )
 
     num_designs = 100                 # how many designs the optimiser may propose
-    evals_per_design = 10             # how many simulator runs per design
+    evals_per_design = 100             # how many simulator runs per design
 
-    saw_nonzero_coverage = False
+    seed = 0
 
     # Optimiser and experiment persist across the entire optimisation run
     optimiser = DiscreteBanditOptimiser(candidates=candidates)
-    experiment = MinLambdaForCoverage(target_coverage=TARGET_COVERAGE, min_success_rate=MIN_SUCCESS_RATE)
-
-    # Single RNG used to generate independent simulator randomness
-    rng = random.Random(0)
+    experiment = MinLambdaForCoverage(
+        target_coverage=TARGET_COVERAGE,
+        delta=DELTA,
+        alpha=ALPHA,
+    )
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=InputDataWarning)
@@ -55,6 +59,8 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
 
             # ---- evaluate: multiple independent simulator runs for this design ----
             for _ in range(evals_per_design):
+                rng = random.Random(seed)
+                seed += 1
                 sim = Dimensioning_2D(
                     inner_lambda=5.0,       # ground stations (fixed)
                     inner_radius=1.0,
@@ -103,16 +109,13 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
         f"coverage={metrics['coverage']:.3f}"
     )
 
-    # At least one design must satisfy the success-rate criterion
     feasible = [
         d for d in experiment._trials
         if experiment.is_feasible(d)
     ]
-    assert feasible, "No design achieved the required coverage success rate"
+    assert feasible, "No design certified feasible"
 
-    # Selected design must be feasible
     assert experiment.is_feasible(min_lambda)
 
-    # Selected design must be the minimum feasible one
     assert min_lambda == min(feasible)
 

@@ -1,52 +1,37 @@
-# experiments/min_feasible_coverage.py
+# experimental/min_feasible_coverage.py
 
 from __future__ import annotations
 from typing import Any, Dict
+import math
 
 
 class MinLambdaForCoverage:
     """
-    Find the minimum design value whose empirical success rate
-    (coverage >= target_coverage, conditional on n_ground > 0)
-    exceeds a required threshold.
+    Find the minimum design value whose probability of achieving
+    coverage >= target_coverage is at least (1 - delta),
+    with confidence (1 - alpha).
     """
 
     def __init__(
         self,
         target_coverage: float,
-        min_success_rate: float,
+        delta: float,
+        alpha: float,
     ):
-        """
-        Parameters
-        ----------
-        target_coverage :
-            Coverage threshold defining success for a single simulation.
-        min_success_rate :
-            Required empirical success probability (Level A criterion).
-            Example: 0.9 means "at least 90% of non-trivial runs succeed".
-        """
         self.target_coverage = target_coverage
-        self.min_success_rate = min_success_rate
+        self.delta = delta
+        self.alpha = alpha
 
-        # Per-design counters
         self._trials: Dict[Any, int] = {}
         self._successes: Dict[Any, int] = {}
-
-        # Store last successful metrics for reporting / debugging
         self._last_success_metrics: Dict[Any, dict[str, float]] = {}
 
     def objective(self, design: Any, metrics: dict[str, float]) -> float:
-        """
-        Scalar objective used by the optimiser.
-        We still guide search using coverage magnitude.
-        """
+        # Smooth signal to guide optimiser
         return float(metrics["coverage"])
 
     def on_evaluation(self, design: Any, metrics: dict[str, float]) -> None:
-        """
-        Record one stochastic evaluation of a design.
-        Trivial realisations (n_ground == 0) are ignored.
-        """
+        # Ignore trivial worlds
         if metrics["n_ground"] == 0:
             return
 
@@ -56,32 +41,36 @@ class MinLambdaForCoverage:
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
 
-    def success_rate(self, design: Any) -> float:
+    def _lower_confidence_bound(self, successes: int, trials: int) -> float:
         """
-        Empirical success probability for a design.
+        Clopper–Pearson lower bound.
+        Only the S = n case is implemented explicitly.
         """
-        trials = self._trials.get(design, 0)
         if trials == 0:
             return 0.0
-        return self._successes.get(design, 0) / trials
+
+        if successes == trials:
+            # exact closed form
+            return self.alpha ** (1.0 / trials)
+
+        # Conservative fallback: not certified
+        return 0.0
 
     def is_feasible(self, design: Any) -> bool:
-        """
-        Level A feasibility criterion: empirical success rate.
-        """
-        return self.success_rate(design) >= self.min_success_rate
+        trials = self._trials.get(design, 0)
+        successes = self._successes.get(design, 0)
+
+        lcb = self._lower_confidence_bound(successes, trials)
+        return lcb >= 1.0 - self.delta
 
     def select_min(self) -> tuple[Any, dict[str, float]]:
-        """
-        Select the minimum design value that is empirically feasible.
-        """
-        feasible_designs = [
+        feasible = [
             d for d in self._trials
             if self.is_feasible(d)
         ]
 
-        if not feasible_designs:
-            raise AssertionError("No feasible design found")
+        if not feasible:
+            raise AssertionError("No design certified feasible")
 
-        best = min(feasible_designs)
+        best = min(feasible)
         return best, self._last_success_metrics[best]
