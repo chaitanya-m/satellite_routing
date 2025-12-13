@@ -10,6 +10,13 @@ from experiments.min_feasible_coverage import MinLambdaForCoverage, CertType
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
+from experiments.certificates.base import FeasibilityCertificate
+
+from experiments.certificates.bernoulli import (
+    AllSuccessCertificate,
+    ClopperPearsonCertificate,
+    HoeffdingCertificate
+)
 
 TARGET_COVERAGE = 0.7
 DELTA = 0.05   # allow 5% failure probability
@@ -20,7 +27,7 @@ ALPHA = 0.05   # 95% confidence
 # Shared test harness
 # ---------------------------------------------------------------------------
 
-def run_experiment(cert: CertType):
+def run_experiment(certificate: FeasibilityCertificate) -> MinLambdaForCoverage:
     """
     Run the optimisation + evaluation loop once, returning the experiment.
     The only difference across tests is the certification objective.
@@ -55,9 +62,9 @@ def run_experiment(cert: CertType):
     experiment = MinLambdaForCoverage(
         target_coverage=TARGET_COVERAGE,
         delta=DELTA,
-        alpha=ALPHA,
-        cert=cert,
+        certificate=certificate,
     )
+
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=InputDataWarning)
@@ -103,7 +110,7 @@ def test_all_success_certificate_is_strict():
     - But if a design is certified, it must be the minimum such design
     """
 
-    experiment = run_experiment(cert="all_success")
+    experiment = run_experiment(certificate=AllSuccessCertificate(alpha=ALPHA))
 
     feasible = [
         d for d in experiment._trials
@@ -140,7 +147,7 @@ def test_clopper_pearson_certificate_is_failure_tolerant():
 
     """
 
-    experiment = run_experiment(cert="clopper_pearson")
+    experiment = run_experiment(certificate=ClopperPearsonCertificate(alpha=ALPHA))
 
     feasible = [
         d for d in experiment._trials
@@ -184,7 +191,7 @@ def test_hoeffding_certificate_is_conservative_but_simple():
 
     """
 
-    experiment = run_experiment(cert="hoeffding")
+    experiment = run_experiment(certificate=HoeffdingCertificate(alpha=ALPHA))
 
     feasible = [
         d for d in experiment._trials

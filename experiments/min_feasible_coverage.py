@@ -5,6 +5,7 @@ from typing import Any, Dict, Literal
 import math
 from experiments.certificates.base import FeasibilityCertificate
 
+
 CertType = Literal[
     "all_success",        # failure-intolerant (S = n)
     "clopper_pearson",    # exact, failure-tolerant
@@ -57,6 +58,17 @@ class MinLambdaForCoverage:
         if metrics["coverage"] >= self.target_coverage:
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
+
+
+    # ------------------------------------------------------------------
+    # Feasibility checking
+    # ------------------------------------------------------------------
+    def is_feasible(self, design: Any) -> bool:
+        trials = self._trials.get(design, 0)
+        successes = self._successes.get(design, 0)
+
+        lcb = self.certificate.lower_confidence_bound(successes, trials)
+        return lcb >= 1.0 - self.delta
 
     # ------------------------------------------------------------------
     # Selection
