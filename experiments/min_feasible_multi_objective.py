@@ -117,3 +117,13 @@ class MinFeasibleMultiObjective:
 
         best = min(feasible)
         return best, self._last_success_metrics[best]
+
+
+    def is_valid_trial(self, metrics: dict[str, float]) -> bool:
+        """
+        Return False to ignore this evaluation entirely (it will not count
+        toward trials or successes).
+
+        Default: count every evaluation.
+        """
+        return True
