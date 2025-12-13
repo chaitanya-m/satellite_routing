@@ -36,7 +36,7 @@ class Dimensioning_2D:
         self.last_n_ground: int | None = None
         self.last_n_sats: int | None = None
 
-    def evaluate(self, lambda_outer: float) -> float:
+    def evaluate(self, lambda_outer: float) -> dict[str, float]:
         # Ground stations (NOT optimised)
         n_ground = sample_poisson(self.inner_lambda, self.rng)
 
@@ -46,8 +46,19 @@ class Dimensioning_2D:
         self.last_n_ground = n_ground
         self.last_n_sats = n_sats
 
-        if n_ground == 0 or n_sats == 0:
-            return 0.0
+        if n_ground == 0:
+            return {
+                "coverage": 1.0,   # vacuously covered
+                "n_ground": 0.0,
+                "n_sats": float(n_sats),
+            }
+
+        if n_sats == 0:
+            return {
+                "coverage": 0.0,
+                "n_ground": float(n_ground),
+                "n_sats": 0.0,
+            }
 
         ground_angles = [
             self.rng.uniform(-math.pi, math.pi) for _ in range(n_ground)
@@ -68,4 +79,11 @@ class Dimensioning_2D:
                     covered += 1
                     break
 
-        return covered / n_ground
+
+        coverage = covered / n_ground if n_ground > 0 else 1.0
+
+        return {
+            "coverage": coverage,
+            "n_ground": float(n_ground),
+            "n_sats": float(n_sats),
+        }
