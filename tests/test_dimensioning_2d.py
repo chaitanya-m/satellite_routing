@@ -39,7 +39,8 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
 
             for _ in range(num_optimiser_steps):
                 lambda_outer = optimiser.ask()
-                coverage = sim.evaluate(lambda_outer)
+                metrics = sim.evaluate(lambda_outer)
+                coverage = metrics["coverage"]
                 optimiser.tell(lambda_outer, coverage)
 
                 if coverage > 0.0:
@@ -47,14 +48,13 @@ def test_dimensioning_2d_prefers_higher_outer_intensity():
 
                 if coverage >= TARGET_COVERAGE:
                     feasible_records.append(
-                    (
-                        lambda_outer,
-                        sim.last_n_ground,
-                        sim.last_n_sats,
-                        coverage,
+                        (
+                            lambda_outer,
+                            metrics["n_ground"],
+                            metrics["n_sats"],
+                            coverage,
+                        )
                     )
-    )
-
 
         assert feasible_records, "No feasible design found"
 
