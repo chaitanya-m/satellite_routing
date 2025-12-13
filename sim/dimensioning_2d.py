@@ -1,3 +1,5 @@
+# sim/dimensioning_2d.py
+
 import math
 import random
 from sim.stochastic.poisson import sample_poisson

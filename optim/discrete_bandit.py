@@ -1,3 +1,5 @@
+# optim/discrete_bandit.py
+
 import torch
 from botorch.models import SingleTaskGP
 from botorch.fit import fit_gpytorch_mll
