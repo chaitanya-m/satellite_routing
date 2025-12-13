@@ -7,19 +7,31 @@ from experiments.certificates.base import FeasibilityCertificate
 
 class SingleObjectiveDiscreteExperiment(ABC):
     """
-    Domain-agnostic base class for single-objective, discrete experiments
-    with probabilistic feasibility guarantees.
+    Abstract base class for single-objective optimisation over repeated
+    stochastic evaluations.
 
-    Responsibilities:
-    - Track trials and successes per design
-    - Apply a statistical feasibility certificate
-    - Select the minimum feasible design
+    This class defines a generic experiment interface in which, for a
+    fixed design, repeated evaluations induce a Bernoulli process over
+    a user-defined success event. Concrete subclasses supply the domain
+    semantics, while this base class provides shared experiment mechanics.
 
-    Subclasses define:
-    - what constitutes a valid trial
-    - what constitutes success
-    - the optimisation objective signal
+    Provided by this base class:
+    - accounting of trials and successes per design,
+    - optional feasibility checks via an injected statistical certificate,
+    - selection of a minimum design under an external ordering.
+
+    Required of subclasses:
+    - definition of what constitutes a valid trial,
+    - definition of what constitutes success for a single evaluation,
+    - definition of a scalar optimisation objective signal.
+
+    Notes:
+    - Statistical guarantees are optional and only applied if feasibility
+      checks are invoked.
+    - No assumptions are made about the evaluation source (simulation,
+      online system, or real-world trials), the optimiser, or the domain.
     """
+
 
     def __init__(
         self,
