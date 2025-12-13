@@ -24,14 +24,12 @@ class Dimensioning_2D:
         inner_radius: float,
         outer_radius: float,
         coverage_distance: float,
-        alpha: float, # cost penalty coefficient for outer lambda, i.e. number of satellites
         rng: random.Random | None = None,
     ):
         self.inner_lambda = float(inner_lambda)
         self.inner_radius = float(inner_radius)
         self.outer_radius = float(outer_radius)
         self.coverage_distance = float(coverage_distance)
-        self.alpha = float(alpha)
         self.rng = rng or random.Random()
 
         # Last realised counts (for inspection / testing only)
