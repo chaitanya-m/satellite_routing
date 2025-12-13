@@ -13,6 +13,13 @@ class DiscreteBanditOptimiser:
         self.Y: Optional[torch.Tensor] = None
         self.model: Optional[SingleTaskGP] = None
 
+        # For Hyperparameter fitting through maximising log marginal likelihood
+        # We don't want to maximize marginal log likelihood without enough data... 
+        # We can still condition and update the posteriors though
+        self.min_fit_points = 10  
+        self.num_obs = 0
+
+
     def ask(self) -> float:
         # Cold start: no data yet (or model not fit yet)
         if self.X is None or self.Y is None or self.model is None:
@@ -44,7 +51,12 @@ class DiscreteBanditOptimiser:
             self.Y = torch.cat([Y_prev, y_t], dim=0)
 
         self.model = SingleTaskGP(self.X, self.Y)
-        mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
-        fit_gpytorch_mll(mll)
+
+        self.num_obs += 1
+        if self.num_obs >= self.min_fit_points:
+            mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
+            fit_gpytorch_mll(mll)
+        
+
 
 
