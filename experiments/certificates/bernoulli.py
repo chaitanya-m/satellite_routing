@@ -121,6 +121,9 @@ class HoeffdingCertificate(FeasibilityCertificate):
     Compared to Clopper–Pearson, this bound is simpler and distribution-free,
     but more conservative, especially for small n.
 
+    Achieving a margin epsilon on the estimate requires
+        n >= log(1/alpha) / (2 * epsilon^2) trials
+
     """
 
     def __init__(self, alpha: float):
