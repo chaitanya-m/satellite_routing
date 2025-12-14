@@ -97,6 +97,41 @@ def run_experiment(certificate: FeasibilityCertificate) -> MinLambdaForCoverage:
 
 
 # ---------------------------------------------------------------------------
+# Certificate-driven feasibility (orchestration-owned)
+# ---------------------------------------------------------------------------
+
+def is_feasible(
+    *,
+    experiment: MinLambdaForCoverage,
+    certificate: FeasibilityCertificate,
+    delta: float,
+    design: float,
+) -> bool:
+    trials = experiment._trials.get(design, 0)
+    successes = experiment._successes.get(design, 0)
+    lcb = certificate.lower_confidence_bound(successes, trials)
+    return lcb >= 1.0 - delta
+
+
+def select_min_feasible(
+    *,
+    experiment: MinLambdaForCoverage,
+    certificate: FeasibilityCertificate,
+    delta: float,
+) -> tuple[float, dict[str, float]]:
+    feasible = [
+        d
+        for d in experiment._trials
+        if is_feasible(experiment=experiment, certificate=certificate, delta=delta, design=d)
+    ]
+    if not feasible:
+        raise AssertionError("No design certified feasible")
+
+    best = min(feasible)
+    return best, experiment._last_success_metrics[best]
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -110,18 +145,19 @@ def test_all_success_certificate_is_strict():
     - But if a design is certified, it must be the minimum such design
     """
 
-    experiment = run_experiment(certificate=AllSuccessCertificate(alpha=ALPHA))
+    certificate = AllSuccessCertificate(alpha=ALPHA)
+    experiment = run_experiment(certificate=certificate)
 
     feasible = [
         d for d in experiment._trials
-        if experiment.is_feasible(d)
+        if is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=d)
     ]
 
     assert feasible, "All-success certificate should certify at least one design"
 
-    min_lambda, _ = experiment.select_min()
+    min_lambda, _ = select_min_feasible(experiment=experiment, certificate=certificate, delta=DELTA)
 
-    assert experiment.is_feasible(min_lambda)
+    assert is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=min_lambda)
     assert min_lambda == min(feasible)
 
 
@@ -147,18 +183,19 @@ def test_clopper_pearson_certificate_is_failure_tolerant():
 
     """
 
-    experiment = run_experiment(certificate=ClopperPearsonCertificate(alpha=ALPHA))
+    certificate = ClopperPearsonCertificate(alpha=ALPHA)
+    experiment = run_experiment(certificate=certificate)
 
     feasible = [
         d for d in experiment._trials
-        if experiment.is_feasible(d)
+        if is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=d)
     ]
 
     assert feasible, "Clopper–Pearson certificate should certify at least one design"
 
-    min_lambda, _ = experiment.select_min()
+    min_lambda, _ = select_min_feasible(experiment=experiment, certificate=certificate, delta=DELTA)
 
-    assert experiment.is_feasible(min_lambda)
+    assert is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=min_lambda)
     assert min_lambda == min(feasible)
 
 
@@ -191,17 +228,17 @@ def test_hoeffding_certificate_is_conservative_but_simple():
 
     """
 
-    experiment = run_experiment(certificate=HoeffdingCertificate(alpha=ALPHA))
+    certificate = HoeffdingCertificate(alpha=ALPHA)
+    experiment = run_experiment(certificate=certificate)
 
     feasible = [
         d for d in experiment._trials
-        if experiment.is_feasible(d)
+        if is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=d)
     ]
 
     assert feasible, "Hoeffding certificate should certify at least one design"
 
-    min_lambda, _ = experiment.select_min()
+    min_lambda, _ = select_min_feasible(experiment=experiment, certificate=certificate, delta=DELTA)
 
-    assert experiment.is_feasible(min_lambda)
+    assert is_feasible(experiment=experiment, certificate=certificate, delta=DELTA, design=min_lambda)
     assert min_lambda == min(feasible)
-
