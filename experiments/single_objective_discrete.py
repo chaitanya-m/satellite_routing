@@ -1,5 +1,7 @@
+# experiments/single_objective_discrete.py
+
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 
 from experiments.certificates.base import FeasibilityCertificate
@@ -100,13 +102,13 @@ class SingleObjectiveDiscreteExperiment(ABC):
         lcb = self.certificate.lower_confidence_bound(successes, trials)
         return lcb >= 1.0 - self.delta
 
-    def select_min(self) -> tuple[Any, dict[str, float]]:
+    def select_min(self) -> tuple[Optional[Any], Optional[dict[str, float]]]:
         """
         Select the minimum feasible design according to the design ordering.
         """
         feasible = [d for d in self._trials if self.is_feasible(d)]
         if not feasible:
-            raise AssertionError("No design certified feasible")
+            return None, None
 
         best = min(feasible)
         return best, self._last_success_metrics[best]
