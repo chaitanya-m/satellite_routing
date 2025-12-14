@@ -3,8 +3,6 @@
 from __future__ import annotations
 from typing import Any
 
-import warnings
-
 from experiments.single_objective_discrete import (
     SingleObjectiveDiscreteExperiment,
 )
@@ -61,18 +59,6 @@ class MinFeasibleDimensioning(SingleObjectiveDiscreteExperiment):
             Z["coverage"] >= self.min_coverage
             and Z["signal_intensity"] >= self.min_signal_intensity
         )
-
-    # ------------------------------------------------------------------
-    # Backwards compatibility (temporary)
-    # ------------------------------------------------------------------
-
-    def is_success(self, metrics: dict[str, float]) -> bool:
-        warnings.warn(
-            "is_success() is deprecated; override accept(Z) instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.accept(metrics)
 
     def objective(self, design: Any, metrics: dict[str, float]) -> float:
         """

@@ -1,7 +1,6 @@
 # experiments/multi_objective.py
 
 from __future__ import annotations
-import warnings
 from typing import Any, Dict, Tuple
 from abc import ABC, abstractmethod
 
@@ -32,7 +31,7 @@ class MultiObjectiveExperiment(ABC):
     Required of subclasses:
     - definition of what constitutes a valid trial,
     - definition of the objective vector for a single evaluation,
-    - definition of what constitutes success (if used).
+    - definition of what constitutes success (accept), if used.
 
     Notes:
     - Objectives are vector-valued and never scalarised here.
@@ -88,18 +87,6 @@ class MultiObjectiveExperiment(ABC):
         Per-trial success predicate for feasibility checks.
         """
         raise NotImplementedError
-
-    def is_success(self, metrics: dict[str, float]) -> bool:
-        """
-        Deprecated legacy Bernoulli predicate.
-        Override accept(Z) instead.
-        """
-        warnings.warn(
-            "is_success() is deprecated; override accept(Z) instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.accept(metrics)
 
     # ------------------------------------------------------------------
     # Generic experiment mechanics

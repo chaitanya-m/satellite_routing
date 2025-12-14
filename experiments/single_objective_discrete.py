@@ -1,7 +1,6 @@
 # experiments/single_objective_discrete.py
 
 from __future__ import annotations
-import warnings
 from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 
@@ -26,7 +25,7 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
 
     Required of subclasses:
     - definition of what constitutes a valid trial,
-    - definition of what constitutes success for a single evaluation,
+    - definition of what constitutes success for a single evaluation (accept),
     - definition of a scalar optimisation objective signal.
 
     Notes:
@@ -74,18 +73,6 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
         Default behaviour: count every evaluation as a trial.
         """
         return True
-
-    def is_success(self, metrics: dict[str, float]) -> bool:
-        """
-        Deprecated legacy Bernoulli predicate.
-        Override accept(Z) instead.
-        """
-        warnings.warn(
-            "is_success() is deprecated; override accept(Z) instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.accept(metrics)
 
     # ------------------------------------------------------------------
     # Generic experiment mechanics
