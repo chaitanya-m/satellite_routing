@@ -5,9 +5,10 @@ from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 
 from experiments.certificates.base import FeasibilityCertificate
+from experiments.base import Experiment
 
 
-class SingleObjectiveDiscreteExperiment(ABC):
+class SingleObjectiveDiscreteExperiment(Experiment, ABC):
     """
     Abstract base class for single-objective optimisation over repeated
     stochastic evaluations.
@@ -52,6 +53,21 @@ class SingleObjectiveDiscreteExperiment(ABC):
     # Hooks for domain-specific semantics
     # ------------------------------------------------------------------
 
+    def metric(self, design: Any, metrics: dict[str, float]) -> dict[str, float]:
+        """
+        Canonical per-trial object Z(d, ω).
+        For Bernoulli dimensioning experiments, Z is just the raw metrics.
+        """
+        return metrics
+
+    def accept(self, Z: dict[str, float]) -> bool:
+        """
+        Per-trial success event. This is the Bernoulli predicate.
+        Delegates to the legacy is_success(metrics) hook for compatibility.
+        """
+        return self.is_success(Z)
+
+
     def is_valid_trial(self, metrics: dict[str, float]) -> bool:
         """
         Return False to ignore this evaluation entirely (it will not count
@@ -75,6 +91,8 @@ class SingleObjectiveDiscreteExperiment(ABC):
         """
         raise NotImplementedError
 
+
+
     # ------------------------------------------------------------------
     # Generic experiment mechanics
     # ------------------------------------------------------------------
@@ -88,7 +106,8 @@ class SingleObjectiveDiscreteExperiment(ABC):
 
         self._trials[design] = self._trials.get(design, 0) + 1
 
-        if self.is_success(metrics):
+        Z = self.metric(design, metrics)
+        if self.accept(Z):
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
 
