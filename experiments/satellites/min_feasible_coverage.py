@@ -29,7 +29,7 @@ class MinLambdaForCoverage(SingleObjectiveDiscreteExperiment):
         self.target_coverage = target_coverage
 
     # ------------------------------------------------------------------
-    # Domain semantics
+    # Bernoulli semantics (canonical)
     # ------------------------------------------------------------------
 
     def is_valid_trial(self, metrics: dict[str, float]) -> bool:
@@ -39,11 +39,8 @@ class MinLambdaForCoverage(SingleObjectiveDiscreteExperiment):
         """
         return metrics.get("n_ground", 1) != 0
 
-    def is_success(self, metrics: dict[str, float]) -> bool:
-        """
-        A valid trial is successful iff coverage meets the target.
-        """
-        return float(metrics["coverage"]) >= self.target_coverage
+    def accept(self, Z: dict[str, float]) -> bool:
+        return float(Z["coverage"]) >= self.target_coverage
 
     def objective(self, design: Any, metrics: dict[str, float]) -> float:
         """

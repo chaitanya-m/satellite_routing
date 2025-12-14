@@ -1,6 +1,7 @@
 # experiments/single_objective_discrete.py
 
 from __future__ import annotations
+import warnings
 from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 
@@ -34,8 +35,6 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
     - No assumptions are made about the evaluation source (simulation,
       online system, or real-world trials), the optimiser, or the domain.
     """
-
-
     def __init__(
         self,
         *,
@@ -60,13 +59,12 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
         """
         return metrics
 
+    @abstractmethod
     def accept(self, Z: dict[str, float]) -> bool:
         """
         Per-trial success event. This is the Bernoulli predicate.
-        Delegates to the legacy is_success(metrics) hook for compatibility.
         """
-        return self.is_success(Z)
-
+        raise NotImplementedError
 
     def is_valid_trial(self, metrics: dict[str, float]) -> bool:
         """
@@ -77,15 +75,17 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
         """
         return True
 
-    @abstractmethod
     def is_success(self, metrics: dict[str, float]) -> bool:
         """
-        Return True iff a valid trial is considered successful.
+        Deprecated legacy Bernoulli predicate.
+        Override accept(Z) instead.
         """
-        raise NotImplementedError
-
-
-
+        warnings.warn(
+            "is_success() is deprecated; override accept(Z) instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.accept(metrics)
 
     # ------------------------------------------------------------------
     # Generic experiment mechanics

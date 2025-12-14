@@ -116,7 +116,8 @@ def test_min_feasible_dimensioning_with_signal_constraint():
                 # Count only valid trials for reward purposes
                 if metrics["n_ground"] > 0.0:
                     n_reward_trials[d] = n_reward_trials.get(d, 0) + 1
-                    if experiment.is_success(metrics):
+                    Z = experiment.metric(lambda_outer, metrics)
+                    if experiment.accept(Z):
                         n_success[d] = n_success.get(d, 0) + 1
 
 

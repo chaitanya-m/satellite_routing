@@ -1,6 +1,7 @@
 # experiments/multi_objective.py
 
 from __future__ import annotations
+import warnings
 from typing import Any, Dict, Tuple
 from abc import ABC, abstractmethod
 
@@ -74,15 +75,31 @@ class MultiObjectiveExperiment(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def is_success(self, metrics: dict[str, float]) -> bool:
+    def metric(self, design: Any, metrics: dict[str, float]) -> dict[str, float]:
         """
-        Return True iff a valid evaluation is considered a success.
+        Canonical per-trial object Z(d, ω).
+        Default: raw metrics.
+        """
+        return metrics
 
-        This predicate is optional in the sense that feasibility checks
-        need not be invoked in plain optimisation workflows.
+    @abstractmethod
+    def accept(self, Z: dict[str, float]) -> bool:
+        """
+        Per-trial success predicate for feasibility checks.
         """
         raise NotImplementedError
+
+    def is_success(self, metrics: dict[str, float]) -> bool:
+        """
+        Deprecated legacy Bernoulli predicate.
+        Override accept(Z) instead.
+        """
+        warnings.warn(
+            "is_success() is deprecated; override accept(Z) instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.accept(metrics)
 
     # ------------------------------------------------------------------
     # Generic experiment mechanics
@@ -97,7 +114,8 @@ class MultiObjectiveExperiment(ABC):
 
         self._trials[design] = self._trials.get(design, 0) + 1
 
-        if self.is_success(metrics):
+        Z = self.metric(design, metrics)
+        if self.accept(Z):
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
 
