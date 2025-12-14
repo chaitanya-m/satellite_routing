@@ -84,12 +84,6 @@ class SingleObjectiveDiscreteExperiment(Experiment, ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def objective(self, design: Any, metrics: dict[str, float]) -> float:
-        """
-        Return a scalar optimisation signal for the optimiser.
-        """
-        raise NotImplementedError
 
 
 
