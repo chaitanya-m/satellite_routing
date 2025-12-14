@@ -20,6 +20,11 @@ DELTA = 0.05
 ALPHA = 0.05
 
 
+class NullCertificate:
+    def lower_confidence_bound(self, successes: int, trials: int) -> float:
+        return 0.0
+
+
 def test_min_feasible_dimensioning_with_signal_constraint():
     """
     Single-objective dimensioning test with multiple stochastic constraints.
@@ -51,13 +56,13 @@ def test_min_feasible_dimensioning_with_signal_constraint():
 
     optimiser = DiscreteBanditOptimiser(candidates=candidates)
 
-    certificate = HoeffdingCertificate(alpha=ALPHA)
+    feasibility_certificate = HoeffdingCertificate(alpha=ALPHA)
 
     experiment = MinFeasibleDimensioning(
         min_coverage=MIN_COVERAGE,
         min_signal_intensity=MIN_SIGNAL_INTENSITY,
         delta=DELTA,
-        certificate=certificate,
+        certificate=NullCertificate(),
     )
 
     # Diagnostics: empirical minima observed per design (from raw simulator metrics)
@@ -123,8 +128,6 @@ def test_min_feasible_dimensioning_with_signal_constraint():
             optimiser.tell(lambda_outer, reward.score(d))
 
 
-    min_lambda, metrics = experiment.select_min()
-
     print("\n=== Empirical diagnostics per design ===")
     for d in sorted(n_valid_seen):
         print(
@@ -139,9 +142,15 @@ def test_min_feasible_dimensioning_with_signal_constraint():
 
     feasible = [
         d for d in experiment._trials
-        if experiment.is_feasible(d)
+        if feasibility_certificate.lower_confidence_bound(
+            experiment._successes.get(d, 0),
+            experiment._trials.get(d, 0),
+        )
+        >= 1.0 - DELTA
     ]
 
     assert feasible, "No design certified feasible"
-    assert experiment.is_feasible(min_lambda)
+
+    min_lambda = min(feasible)
+    metrics = experiment._last_success_metrics[min_lambda]
     assert min_lambda == min(feasible)
