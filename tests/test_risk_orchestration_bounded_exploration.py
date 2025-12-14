@@ -10,6 +10,7 @@ from botorch.exceptions import InputDataWarning
 from experiments.satellites.min_feasible_coverage import MinLambdaForCoverage
 from experiments.certificates.base import FeasibilityCertificate
 from orchestrator.risk import EmpiricalSuccessRate
+from orchestrator.meta_optimise import OptimiserRun, run_with_coverage
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
@@ -127,17 +128,43 @@ def test_risk_orchestration_budgeted_optimiser_prefers_cheapest():
             utilities[d] = sr - 1.0
         return utilities[d]
 
+    candidate_values = [float(x.item()) for x in candidates.squeeze(1)]
+
+    def is_affordable(d: float) -> bool:
+        return estimate_trial_ops(d) <= max_ops
+
+    def should_stop(trace: OptimiserRun) -> bool:
+        feasible = [
+            d
+            for d in trace.evaluated
+            if is_affordable(d)
+            and reward.trials(d) >= min_valid_trials
+            and reward.score(d) >= target_success_rate
+        ]
+        if not feasible:
+            return False
+
+        cheapest_feasible = min(feasible)
+        cheaper_affordable = [d for d in candidate_values if is_affordable(d) and d < cheapest_feasible]
+        cheaper_exhausted = all(
+            reward.trials(d) >= min_valid_trials and reward.score(d) < target_success_rate
+            for d in cheaper_affordable
+        )
+        return cheaper_exhausted
+
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=InputDataWarning)
 
-        # Ask/tell loop: optimiser proposes; orchestrator enforces resource limits
-        # and reports a cost-aware scalar back.
-        for _ in range(205):
-            x = optimiser.ask()
-            asked.append(float(x))
-            y = utility(x)
-            optimiser.tell(x, y)
-            evaluated.add(float(x))
+        trace = run_with_coverage(
+            optimiser=optimiser,
+            candidates=candidate_values,
+            is_affordable=is_affordable,
+            utility=utility,
+            should_stop=should_stop,
+            max_stagnant_steps=50,
+        )
+        asked.extend(trace.asked)
+        evaluated |= trace.evaluated
 
     print("\n=== Risk-driven, budgeted optimisation ===")
     print(f"max_ops_per_trial={max_ops} | affordable_max_lambda={affordable_max_lambda:.1f}")
@@ -153,7 +180,7 @@ def test_risk_orchestration_budgeted_optimiser_prefers_cheapest():
         print(f"asked lambda={x:.1f} | n={n:3d} | {status}")
 
     print("\n=== Empirical risk per design (evaluated) ===")
-    for d in sorted(x for x in evaluated if estimate_trial_ops(x) <= max_ops):
+    for d in (x for x in evaluated if estimate_trial_ops(x) <= max_ops):
         trials = reward.trials(d)
         invalid = invalid_trials.get(d, 0)
         attempted = trials + invalid
