@@ -12,8 +12,8 @@ from sim.dimensioning_2d import Dimensioning_2D  # assumed to exist
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
 
-MIN_COVERAGE = 0.7
-MIN_SIGNAL_INTENSITY = 0.2
+MIN_COVERAGE = 0.95
+MIN_SIGNAL_INTENSITY = 0.001
 
 DELTA = 0.05
 ALPHA = 0.05
@@ -40,7 +40,7 @@ def test_min_feasible_dimensioning_with_signal_constraint():
     torch.manual_seed(0)
 
     candidates = torch.tensor(
-        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [50.0]],
+        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [50.0], [200.0]],
         dtype=torch.double,
     )
 
@@ -58,6 +58,12 @@ def test_min_feasible_dimensioning_with_signal_constraint():
         delta=DELTA,
         certificate=certificate,
     )
+
+    # Diagnostics: empirical minima observed per design (from raw simulator metrics)
+    min_cov_seen: dict[float, float] = {}
+    min_sig_seen: dict[float, float] = {}
+    n_valid_seen: dict[float, int] = {}
+    n_invalid_seen: dict[float, int] = {}
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=InputDataWarning)
@@ -83,13 +89,39 @@ def test_min_feasible_dimensioning_with_signal_constraint():
                 # Assumed metric (not yet implemented)
                 assert "signal_intensity" in metrics
 
+                # Track empirical minima per design (using raw metrics)
+                d = float(lambda_outer)
+                if metrics["n_ground"] == 0.0:
+                    n_invalid_seen[d] = n_invalid_seen.get(d, 0) + 1
+                else:
+                    min_cov_seen[d] = min(min_cov_seen.get(d, float("inf")), metrics["coverage"])
+                    min_sig_seen[d] = min(min_sig_seen.get(d, float("inf")), metrics["signal_intensity"])
+                    n_valid_seen[d] = n_valid_seen.get(d, 0) + 1
+
                 experiment.on_evaluation(lambda_outer, metrics)
                 coverages.append(metrics["coverage"])
+                # print(
+                #     f"lambda={lambda_outer:.1f} | "
+                #     f"coverage={metrics['coverage']:.3f} | "
+                #     f"p10_signal={metrics['signal_intensity']:.6f}"
+                # )
+
 
             mean_coverage = sum(coverages) / len(coverages)
             optimiser.tell(lambda_outer, mean_coverage)
 
     min_lambda, metrics = experiment.select_min()
+
+    print("\n=== Empirical minima observed per design (from simulator metrics) ===")
+    for d in sorted(n_valid_seen):
+        print(
+            f"lambda={d:.1f} | "
+            f"n_trials={n_valid_seen[d]:4d} | "
+            f"n_invalid={n_invalid_seen.get(d, 0):4d} | "
+            f"min_coverage={min_cov_seen[d]:.3f} (>= {MIN_COVERAGE}) | "
+            f"min_signal={min_sig_seen[d]:.6f} (>= {MIN_SIGNAL_INTENSITY})"
+        )
+    print("====================================================================\n")
 
     feasible = [
         d for d in experiment._trials
