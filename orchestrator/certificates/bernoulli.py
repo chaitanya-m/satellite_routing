@@ -1,3 +1,5 @@
+# orchestrator/certificates/bernoulli.py
+
 from __future__ import annotations
 import math
 from .base import FeasibilityCertificate
