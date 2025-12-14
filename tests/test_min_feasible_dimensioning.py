@@ -8,6 +8,7 @@ from botorch.exceptions import InputDataWarning
 
 from experiments.satellites.min_feasible_dimensioning import MinFeasibleDimensioning
 from experiments.certificates.bernoulli import HoeffdingCertificate
+from orchestrator.risk import EmpiricalSuccessRate
 from sim.dimensioning_2d import Dimensioning_2D  # assumed to exist
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
@@ -66,8 +67,7 @@ def test_min_feasible_dimensioning_with_signal_constraint():
     n_invalid_seen: dict[float, int] = {}
 
     # Optimiser reward: empirical success rate
-    n_success: dict[float, int] = {}
-    n_reward_trials: dict[float, int] = {}
+    reward = EmpiricalSuccessRate()
 
 
     with warnings.catch_warnings():
@@ -115,35 +115,23 @@ def test_min_feasible_dimensioning_with_signal_constraint():
 
                 # Count only valid trials for reward purposes
                 if metrics["n_ground"] > 0.0:
-                    n_reward_trials[d] = n_reward_trials.get(d, 0) + 1
                     Z = experiment.metric(lambda_outer, metrics)
-                    if experiment.accept(Z):
-                        n_success[d] = n_success.get(d, 0) + 1
+                    reward.update(d, Z, accepted=experiment.accept(Z))
 
 
             d = float(lambda_outer)
-
-            if n_reward_trials.get(d, 0) > 0:
-                success_rate = n_success.get(d, 0) / n_reward_trials[d]
-            else:
-                success_rate = 0.0
-
-            optimiser.tell(lambda_outer, success_rate)
+            optimiser.tell(lambda_outer, reward.score(d))
 
 
     min_lambda, metrics = experiment.select_min()
 
     print("\n=== Empirical diagnostics per design ===")
     for d in sorted(n_valid_seen):
-        successes = n_success.get(d, 0)
-        trials = n_reward_trials.get(d, 0)
-        success_rate = successes / trials if trials > 0 else 0.0
-
         print(
             f"lambda={d:.1f} | "
             f"n_valid={n_valid_seen[d]:4d} | "
             f"n_invalid={n_invalid_seen.get(d, 0):4d} | "
-            f"success_rate={success_rate:.3f} | "
+            f"success_rate={reward.score(d):.3f} | "
             f"min_coverage={min_cov_seen[d]:.3f} (>= {MIN_COVERAGE}) | "
             f"min_signal={min_sig_seen[d]:.6f} (>= {MIN_SIGNAL_INTENSITY})"
         )
