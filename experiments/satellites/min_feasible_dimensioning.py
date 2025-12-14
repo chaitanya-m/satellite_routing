@@ -3,6 +3,8 @@
 from __future__ import annotations
 from typing import Any
 
+import warnings
+
 from experiments.single_objective_discrete import (
     SingleObjectiveDiscreteExperiment,
 )
@@ -45,7 +47,7 @@ class MinFeasibleDimensioning(SingleObjectiveDiscreteExperiment):
         self.min_signal_intensity = min_signal_intensity
 
     # ------------------------------------------------------------------
-    # Domain semantics
+    # Bernoulli semantics (canonical)
     # ------------------------------------------------------------------
 
     def is_valid_trial(self, metrics: dict[str, float]) -> bool:
@@ -54,14 +56,23 @@ class MinFeasibleDimensioning(SingleObjectiveDiscreteExperiment):
         """
         return metrics.get("n_ground", 1) != 0
 
-    def is_success(self, metrics: dict[str, float]) -> bool:
-        """
-        A valid trial is successful iff all constraints are met.
-        """
+    def accept(self, Z: dict[str, float]) -> bool:
         return (
-            float(metrics["coverage"]) >= self.min_coverage
-            and float(metrics["signal_intensity"]) >= self.min_signal_intensity
+            Z["coverage"] >= self.min_coverage
+            and Z["signal_intensity"] >= self.min_signal_intensity
         )
+
+    # ------------------------------------------------------------------
+    # Backwards compatibility (temporary)
+    # ------------------------------------------------------------------
+
+    def is_success(self, metrics: dict[str, float]) -> bool:
+        warnings.warn(
+            "is_success() is deprecated; override accept(Z) instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.accept(metrics)
 
     def objective(self, design: Any, metrics: dict[str, float]) -> float:
         """
