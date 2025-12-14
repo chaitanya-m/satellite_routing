@@ -1,3 +1,5 @@
+# experiments/satellites/min_feasible_coverage.py
+
 from __future__ import annotations
 from typing import Any
 

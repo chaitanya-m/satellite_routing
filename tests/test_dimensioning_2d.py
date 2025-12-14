@@ -6,7 +6,7 @@ import warnings
 
 from botorch.exceptions import InputDataWarning
 
-from experiments.min_feasible_coverage import MinLambdaForCoverage
+from experiments.satellites.min_feasible_coverage import MinLambdaForCoverage
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 

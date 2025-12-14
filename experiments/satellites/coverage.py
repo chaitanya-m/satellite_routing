@@ -1,4 +1,4 @@
-# experiments/coverage.py
+# experiments/satellites/coverage.py
 
 from __future__ import annotations
 
