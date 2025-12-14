@@ -40,7 +40,7 @@ def test_min_feasible_dimensioning_with_signal_constraint():
     torch.manual_seed(0)
 
     candidates = torch.tensor(
-        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [50.0], [200.0]],
+        [[0.0], [2.0], [10.0], [20.0], [30.0], [40.0], [50.0], [60.0], [70.0], [80.0], [90.0], [100.0]],
         dtype=torch.double,
     )
 
@@ -64,6 +64,11 @@ def test_min_feasible_dimensioning_with_signal_constraint():
     min_sig_seen: dict[float, float] = {}
     n_valid_seen: dict[float, int] = {}
     n_invalid_seen: dict[float, int] = {}
+
+    # Optimiser reward: empirical success rate
+    n_success: dict[float, int] = {}
+    n_reward_trials: dict[float, int] = {}
+
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=InputDataWarning)
@@ -98,7 +103,6 @@ def test_min_feasible_dimensioning_with_signal_constraint():
                     min_sig_seen[d] = min(min_sig_seen.get(d, float("inf")), metrics["signal_intensity"])
                     n_valid_seen[d] = n_valid_seen.get(d, 0) + 1
 
-                experiment.on_evaluation(lambda_outer, metrics)
                 coverages.append(metrics["coverage"])
                 # print(
                 #     f"lambda={lambda_outer:.1f} | "
@@ -106,22 +110,43 @@ def test_min_feasible_dimensioning_with_signal_constraint():
                 #     f"p10_signal={metrics['signal_intensity']:.6f}"
                 # )
 
+                experiment.on_evaluation(lambda_outer, metrics)
+                d = float(lambda_outer)
 
-            mean_coverage = sum(coverages) / len(coverages)
-            optimiser.tell(lambda_outer, mean_coverage)
+                # Count only valid trials for reward purposes
+                if metrics["n_ground"] > 0.0:
+                    n_reward_trials[d] = n_reward_trials.get(d, 0) + 1
+                    if experiment.is_success(metrics):
+                        n_success[d] = n_success.get(d, 0) + 1
+
+
+            d = float(lambda_outer)
+
+            if n_reward_trials.get(d, 0) > 0:
+                success_rate = n_success.get(d, 0) / n_reward_trials[d]
+            else:
+                success_rate = 0.0
+
+            optimiser.tell(lambda_outer, success_rate)
+
 
     min_lambda, metrics = experiment.select_min()
 
-    print("\n=== Empirical minima observed per design (from simulator metrics) ===")
+    print("\n=== Empirical diagnostics per design ===")
     for d in sorted(n_valid_seen):
+        successes = n_success.get(d, 0)
+        trials = n_reward_trials.get(d, 0)
+        success_rate = successes / trials if trials > 0 else 0.0
+
         print(
             f"lambda={d:.1f} | "
-            f"n_trials={n_valid_seen[d]:4d} | "
+            f"n_valid={n_valid_seen[d]:4d} | "
             f"n_invalid={n_invalid_seen.get(d, 0):4d} | "
+            f"success_rate={success_rate:.3f} | "
             f"min_coverage={min_cov_seen[d]:.3f} (>= {MIN_COVERAGE}) | "
             f"min_signal={min_sig_seen[d]:.6f} (>= {MIN_SIGNAL_INTENSITY})"
         )
-    print("====================================================================\n")
+    print("=======================================\n")
 
     feasible = [
         d for d in experiment._trials
