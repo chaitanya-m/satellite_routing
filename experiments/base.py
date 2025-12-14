@@ -7,17 +7,31 @@ from typing import Any
 
 class Experiment:
     """
-    Defines how simulator metrics are interpreted for optimisation.
+    Defines the semantics of a single evaluation.
     """
 
-    def objective(self, design: Any, metrics: dict[str, float]) -> float:
+    def metric(self, design: Any, metrics: dict[str, Any]) -> Any:
         """
-        Map simulator metrics to a scalar objective for the optimiser.
+        Canonical per-trial object Z(d, ω).
+        Default: raw metrics.
         """
-        raise NotImplementedError
+        return metrics
 
-    def on_evaluation(self, design: Any, metrics: dict[str, float]) -> None:
+    def accept(self, Z: Any) -> bool:
         """
-        Optional hook for recording evaluations or feasibility events.
+        Per-trial success predicate.
+        Default: always accept.
+        """
+        return True
+
+    def is_valid_trial(self, metrics: dict[str, Any]) -> bool:
+        """
+        Trial validity (orthogonal to success).
+        """
+        return True
+
+    def on_evaluation(self, design: Any, metrics: dict[str, Any]) -> None:
+        """
+        Optional bookkeeping hook.
         """
         pass
