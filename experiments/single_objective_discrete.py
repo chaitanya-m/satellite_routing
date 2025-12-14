@@ -8,7 +8,7 @@ from experiments.certificates.base import FeasibilityCertificate
 from experiments.base import Experiment
 
 
-class SingleObjectiveDiscreteExperiment(Experiment, ABC):
+class BernoulliExperiment(Experiment, ABC):
     """
     Abstract base class for single-objective optimisation over repeated
     stochastic evaluations.

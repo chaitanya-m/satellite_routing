@@ -4,12 +4,12 @@ from __future__ import annotations
 from typing import Any
 
 from experiments.single_objective_discrete import (
-    SingleObjectiveDiscreteExperiment,
+    BernoulliExperiment,
 )
 from experiments.certificates.base import FeasibilityCertificate
 
 
-class MinLambdaForCoverage(SingleObjectiveDiscreteExperiment):
+class MinLambdaForCoverage(BernoulliExperiment):
     """
     Domain-specific experiment:
 
