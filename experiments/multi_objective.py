@@ -4,8 +4,6 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 from abc import ABC, abstractmethod
 
-from orchestrator.certificates.base import FeasibilityCertificate
-
 
 ObjectiveVector = Tuple[float, ...]
 
@@ -18,15 +16,13 @@ class MultiObjectiveExperiment(ABC):
     For a fixed design, repeated evaluations induce a stochastic process
     over vector-valued objectives. Optionally, a user-defined success
     predicate induces a Bernoulli process that can be analysed with
-    statistical certificates.
+    orchestration-owned statistical machinery.
 
     This class provides shared experiment mechanics, while concrete
     subclasses define domain-specific semantics.
 
     Provided by this base class:
     - accounting of trials and successes per design,
-    - optional feasibility checks via an injected certificate,
-    - selection of a minimum design under an external ordering.
 
     Required of subclasses:
     - definition of what constitutes a valid trial,
@@ -43,13 +39,7 @@ class MultiObjectiveExperiment(ABC):
 
     def __init__(
         self,
-        *,
-        delta: float,
-        certificate: FeasibilityCertificate,
     ):
-        self.delta = delta
-        self.certificate = certificate
-
         self._trials: Dict[Any, int] = {}
         self._successes: Dict[Any, int] = {}
         self._last_success_metrics: Dict[Any, dict[str, float]] = {}
@@ -105,32 +95,3 @@ class MultiObjectiveExperiment(ABC):
         if self.accept(Z):
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
-
-    # ------------------------------------------------------------------
-    # Feasibility (optional)
-    # ------------------------------------------------------------------
-
-    def is_feasible(self, design: Any) -> bool:
-        """
-        Check whether a design is feasible under the chosen certificate.
-        """
-        trials = self._trials.get(design, 0)
-        successes = self._successes.get(design, 0)
-
-        lcb = self.certificate.lower_confidence_bound(successes, trials)
-        return lcb >= 1.0 - self.delta
-
-    # ------------------------------------------------------------------
-    # Selection (optional)
-    # ------------------------------------------------------------------
-
-    def select_min(self) -> tuple[Any, dict[str, float]]:
-        """
-        Select the minimum feasible design according to the design ordering.
-        """
-        feasible = [d for d in self._trials if self.is_feasible(d)]
-        if not feasible:
-            raise AssertionError("No design certified feasible")
-
-        best = min(feasible)
-        return best, self._last_success_metrics[best]

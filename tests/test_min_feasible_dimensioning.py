@@ -20,11 +20,6 @@ DELTA = 0.05
 ALPHA = 0.05
 
 
-class NullCertificate:
-    def lower_confidence_bound(self, successes: int, trials: int) -> float:
-        return 0.0
-
-
 def test_min_feasible_dimensioning_with_signal_constraint():
     """
     Single-objective dimensioning test with multiple stochastic constraints.
@@ -61,8 +56,6 @@ def test_min_feasible_dimensioning_with_signal_constraint():
     experiment = MinFeasibleDimensioning(
         min_coverage=MIN_COVERAGE,
         min_signal_intensity=MIN_SIGNAL_INTENSITY,
-        delta=DELTA,
-        certificate=NullCertificate(),
     )
 
     # Diagnostics: empirical minima observed per design (from raw simulator metrics)

@@ -1,10 +1,9 @@
 # experiments/single_objective_discrete.py
 
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from abc import ABC, abstractmethod
 
-from orchestrator.certificates.base import FeasibilityCertificate
 from experiments.base import Experiment
 
 
@@ -20,8 +19,6 @@ class BernoulliExperiment(Experiment, ABC):
 
     Provided by this base class:
     - accounting of trials and successes per design,
-    - optional feasibility checks via an injected statistical certificate,
-    - selection of a minimum design under an external ordering.
 
     Required of subclasses:
     - definition of what constitutes a valid trial,
@@ -36,13 +33,7 @@ class BernoulliExperiment(Experiment, ABC):
     """
     def __init__(
         self,
-        *,
-        delta: float,
-        certificate: FeasibilityCertificate,
     ):
-        self.delta = delta
-        self.certificate = certificate
-
         self._trials: Dict[Any, int] = {}
         self._successes: Dict[Any, int] = {}
         self._last_success_metrics: Dict[Any, dict[str, float]] = {}
@@ -91,24 +82,3 @@ class BernoulliExperiment(Experiment, ABC):
         if self.accept(Z):
             self._successes[design] = self._successes.get(design, 0) + 1
             self._last_success_metrics[design] = metrics
-
-    def is_feasible(self, design: Any) -> bool:
-        """
-        Check whether a design is feasible under the chosen certificate.
-        """
-        trials = self._trials.get(design, 0)
-        successes = self._successes.get(design, 0)
-
-        lcb = self.certificate.lower_confidence_bound(successes, trials)
-        return lcb >= 1.0 - self.delta
-
-    def select_min(self) -> tuple[Optional[Any], Optional[dict[str, float]]]:
-        """
-        Select the minimum feasible design according to the design ordering.
-        """
-        feasible = [d for d in self._trials if self.is_feasible(d)]
-        if not feasible:
-            return None, None
-
-        best = min(feasible)
-        return best, self._last_success_metrics[best]

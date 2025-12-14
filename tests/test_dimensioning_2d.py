@@ -61,8 +61,6 @@ def run_experiment(certificate: FeasibilityCertificate) -> MinLambdaForCoverage:
     optimiser = DiscreteBanditOptimiser(candidates=candidates)
     experiment = MinLambdaForCoverage(
         target_coverage=TARGET_COVERAGE,
-        delta=DELTA,
-        certificate=certificate,
     )
 
 

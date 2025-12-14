@@ -6,7 +6,6 @@ from typing import Any
 from experiments.single_objective_discrete import (
     BernoulliExperiment,
 )
-from orchestrator.certificates.base import FeasibilityCertificate
 
 
 class MinFeasibleDimensioning(BernoulliExperiment):
@@ -22,14 +21,10 @@ class MinFeasibleDimensioning(BernoulliExperiment):
       - coverage >= min_coverage, and
       - signal_intensity >= min_signal_intensity.
 
-    Feasibility (optional) means:
-        P(success | design) >= 1 - delta
-    with confidence provided by the injected certificate.
-
     Notes:
     - This is a single-objective optimisation problem (minimise design).
     - Multiple constraints are handled via a compound success predicate.
-    - The optimisation objective is independent of the feasibility check.
+    - The optimisation objective is independent of any feasibility check.
     """
 
     def __init__(
@@ -37,10 +32,8 @@ class MinFeasibleDimensioning(BernoulliExperiment):
         *,
         min_coverage: float,
         min_signal_intensity: float,
-        delta: float,
-        certificate: FeasibilityCertificate,
     ):
-        super().__init__(delta=delta, certificate=certificate)
+        super().__init__()
         self.min_coverage = min_coverage
         self.min_signal_intensity = min_signal_intensity
 

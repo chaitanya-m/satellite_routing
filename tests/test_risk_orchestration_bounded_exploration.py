@@ -8,16 +8,10 @@ import torch
 from botorch.exceptions import InputDataWarning
 
 from experiments.satellites.min_feasible_coverage import MinLambdaForCoverage
-from orchestrator.certificates.base import FeasibilityCertificate
 from orchestrator.risk import EmpiricalSuccessRate
 from orchestrator.meta_optimise import OptimiserRun, run_with_coverage
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
-
-
-class NullCertificate(FeasibilityCertificate):
-    def lower_confidence_bound(self, successes: int, trials: int) -> float:
-        return 0.0
 
 
 def test_risk_orchestration_budgeted_optimiser_prefers_cheapest():
@@ -42,8 +36,6 @@ def test_risk_orchestration_budgeted_optimiser_prefers_cheapest():
 
     experiment = MinLambdaForCoverage(
         target_coverage=coverage_threshold,
-        delta=0.05,
-        certificate=NullCertificate(),
     )
 
     reward = EmpiricalSuccessRate()
