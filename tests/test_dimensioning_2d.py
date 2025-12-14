@@ -10,9 +10,9 @@ from experiments.satellites.min_feasible_coverage import MinLambdaForCoverage
 from sim.dimensioning_2d import Dimensioning_2D
 from optim.discrete_bandit import DiscreteBanditOptimiser
 
-from experiments.certificates.base import FeasibilityCertificate
+from orchestrator.certificates.base import FeasibilityCertificate
 
-from experiments.certificates.bernoulli import (
+from orchestrator.certificates.bernoulli import (
     AllSuccessCertificate,
     ClopperPearsonCertificate,
     HoeffdingCertificate
@@ -204,5 +204,4 @@ def test_hoeffding_certificate_is_conservative_but_simple():
 
     assert experiment.is_feasible(min_lambda)
     assert min_lambda == min(feasible)
-
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 from abc import ABC, abstractmethod
 
-from experiments.certificates.base import FeasibilityCertificate
+from orchestrator.certificates.base import FeasibilityCertificate
 
 
 ObjectiveVector = Tuple[float, ...]

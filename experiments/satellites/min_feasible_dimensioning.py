@@ -6,7 +6,7 @@ from typing import Any
 from experiments.single_objective_discrete import (
     BernoulliExperiment,
 )
-from experiments.certificates.base import FeasibilityCertificate
+from orchestrator.certificates.base import FeasibilityCertificate
 
 
 class MinFeasibleDimensioning(BernoulliExperiment):

@@ -7,7 +7,7 @@ import warnings
 from botorch.exceptions import InputDataWarning
 
 from experiments.satellites.min_feasible_dimensioning import MinFeasibleDimensioning
-from experiments.certificates.bernoulli import HoeffdingCertificate
+from orchestrator.certificates.bernoulli import HoeffdingCertificate
 from orchestrator.risk import EmpiricalSuccessRate
 from sim.dimensioning_2d import Dimensioning_2D  # assumed to exist
 from optim.discrete_bandit import DiscreteBanditOptimiser

@@ -8,7 +8,7 @@ import torch
 from botorch.exceptions import InputDataWarning
 
 from experiments.satellites.min_feasible_coverage import MinLambdaForCoverage
-from experiments.certificates.base import FeasibilityCertificate
+from orchestrator.certificates.base import FeasibilityCertificate
 from orchestrator.risk import EmpiricalSuccessRate
 from orchestrator.meta_optimise import OptimiserRun, run_with_coverage
 from sim.dimensioning_2d import Dimensioning_2D
