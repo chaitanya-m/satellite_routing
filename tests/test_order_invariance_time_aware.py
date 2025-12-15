@@ -26,12 +26,12 @@ def simulate_episode(policy: LinearPolicy, rng: random.Random, t: int, horizon: 
     return total
 
 
-def trial_value(x: Any, rng: random.Random, t: int) -> float:
-    if isinstance(x, (int, float)):
-        return float(x) + 0.05 * float(t) + 0.01 * (rng.random() - 0.5)
-    if isinstance(x, LinearPolicy):
-        return simulate_episode(x, rng=rng, t=t)
-    raise TypeError(f"Unsupported candidate type: {type(x)!r}")
+def trial_value(pi: Any, rng: random.Random, t: int) -> float:
+    if isinstance(pi, (int, float)):
+        return float(pi) + 0.05 * float(t) + 0.01 * (rng.random() - 0.5)
+    if isinstance(pi, LinearPolicy):
+        return simulate_episode(pi, rng=rng, t=t)
+    raise TypeError(f"Unsupported candidate type: {type(pi)!r}")
 
 
 def aggregate_vector(values: list[float]) -> tuple[float, float]:
@@ -43,7 +43,7 @@ def aggregate_vector(values: list[float]) -> tuple[float, float]:
 def evaluate_design_context(
     *,
     candidate_index: int,
-    x: Any,
+    pi: Any,
     context_index: int,
     t: int,
     n_trials: int,
@@ -53,7 +53,7 @@ def evaluate_design_context(
     for k in range(n_trials):
         seed = master_seed + candidate_index * 1_000_000 + context_index * 10_000 + k
         rng = random.Random(seed)
-        values.append(trial_value(x, rng=rng, t=t))
+        values.append(trial_value(pi, rng=rng, t=t))
     return aggregate_vector(values)
 
 
@@ -80,11 +80,11 @@ def test_time_aware_order_invariance_of_aggregated_feedback():
     def run(order: list[int]) -> dict[tuple[int, int], tuple[float, float]]:
         summaries: dict[tuple[int, int], tuple[float, float]] = {}
         for candidate_index in order:
-            x = candidates[candidate_index]
+            pi = candidates[candidate_index]
             for context_index, t in enumerate(contexts):
                 summaries[(candidate_index, t)] = evaluate_design_context(
                     candidate_index=candidate_index,
-                    x=x,
+                    pi=pi,
                     context_index=context_index,
                     t=t,
                     n_trials=n_trials,
@@ -101,4 +101,3 @@ def test_time_aware_order_invariance_of_aggregated_feedback():
     assert set(s1.keys()) == set(s2.keys())
     for key in s1:
         assert s1[key] == s2[key]
-

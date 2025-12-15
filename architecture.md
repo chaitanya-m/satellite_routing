@@ -12,17 +12,22 @@ The optimiser is an interactive system defined by the maps
 $$
 \textsf{ask} : \mathcal H_n \rightarrow \mathcal X,
 \qquad
-\textsf{tell} : (\mathcal H_n, x, \mathbf{s}) \rightarrow \mathcal H_{n+1},
-\qquad \mathbf{s} \in \mathcal S,
+\textsf{tell} : (\mathcal H_n, \pi, \mathbf{s}) \rightarrow \mathcal H_{n+1},
 $$
 
 where the optimiser history is
 
-$\mathcal H_n = {(x_j, \mathbf{s}_j)}_{j \le n}$ with $\mathbf{s}_j \in \mathbb R^k$
+$$
+\mathcal H_n = {(\pi_j, \mathbf{s}_j)}_{j \le n}
+$$ 
+with 
+$$
+\mathbf{s}_j \in \mathbb R^k, \qquad \mathbf{s} \in \mathcal S
+$$
 
-Here $\mathbf{s}$ denotes the aggregated feedback (scalar or vector) returned to the optimiser for a queried $x$, and the index $j$ denotes the optimiser interaction round (the $j$-th ask/tell pair). $\mathcal H_n$ is thus the history of all previous queries to the optimiser and their aggregated feedback.
+Here $\mathbf{s}$ denotes the aggregated feedback (scalar or vector) returned to the optimiser for a queried $\pi$, and the index $j$ denotes the optimiser interaction round (the $j$-th ask/tell pair). $\mathcal H_n$ is thus the history of all previous queries to the optimiser and their aggregated feedback.
 
-The optimiser observes **only aggregated feedback**, $(x,\mathbf{s})$ pairs.
+The optimiser observes **only aggregated feedback**, $(\pi,\mathbf{s})$ pairs.
 It has no access to trials, randomness, risk definitions, feasibility, certificates, or stopping logic.  
 
 
@@ -40,7 +45,7 @@ An experiment defines a random variable
 $$
 Z : \mathcal X \times \Omega \times \mathcal T \rightarrow \mathcal Z,
 \qquad
-(x,\omega,t) \mapsto Z(x,\omega,t),
+(\pi,\omega,t) \mapsto Z(\pi,\omega,t),
 $$
 
 where $\mathcal Z$ may be scalar-, vector-, or trajectory-valued.
@@ -50,54 +55,45 @@ Optionally, it defines a validity indicator
 $$
 v : \mathcal X \times \Omega \times \mathcal T \rightarrow {0,1}.
 $$
+
 which declares whether a trial outcome is admissible.
 
-A simulator is a concrete procedure that, given evaluation time/context $t$, samples $\omega \sim \mathbb P_t$ (via an RNG sequence) and evaluates the sampled $Z(x,\omega,t)$. It encodes system dynamics or physics, not decision logic.
+A simulator is a concrete procedure that, given evaluation time/context $t$, samples $\omega \sim \mathbb P_t$ (via an RNG sequence) and evaluates the sampled $Z(\pi,\omega,t)$. It encodes system dynamics or physics, not decision logic.
 The experiment defines what a trial is; orchestration decides how contexts $t$ are scheduled and how data are aggregated.
 
 ### 3. Static designs vs. online policies
 
-* **Static design**: $x = d \in \mathcal D$ is a fixed parameter vector.
-* **Online policy**: $x = \pi \in \Pi$ is a measurable map
-  $$
-  \pi : h_i \rightarrow a_i,
-  $$
-  inducing closed-loop dynamics
-  $$
-  x_{i+1} = f(x_i, a_i, \varepsilon_i),
-  \qquad
-  a_i = \pi(h_i),
-  \qquad
-  \omega \sim \mathbb P_t.
-  $$
+* **Static design**: $\pi = d \in \mathcal D$ is a fixed parameter vector (a degenerate, non-adaptive policy).
+* **Online policy**: $\pi \in \Pi$ is a measurable map $\pi : h_i \rightarrow a_i$, inducing closed-loop dynamics $x_{i+1} = f(x_i, a_i, \varepsilon_i)$ with $a_i = \pi(h_i)$ and $\omega \sim \mathbb P_t$.
+
 where $i$ is within-episode time and $\varepsilon_i(\omega)$ denotes the exogenous noise at time $i$ (as a function of the world $\omega$). The evaluation-time/context index $t$ and the law $\mathbb P_t$ are defined in Section 2.
-In both cases, a trial is $Z(x,\omega,t)$ with context $t$ scheduled by orchestration.
+In both cases, a trial is $Z(\pi,\omega,t)$ with context $t$ scheduled by orchestration.
 Adaptivity is fully contained inside $Z$; it does not affect the architecture boundary.
 
 
 
 ### 4. Orchestrator (sampling, aggregation, certificates)
 
-For each design or policy $x \in \mathcal X$ and each evaluation time/context $t \in \mathcal T$, the orchestrator draws **design- and context-local worlds**
+For each design or policy $\pi \in \mathcal X$ and each evaluation time/context $t \in \mathcal T$, the orchestrator draws **design- and context-local worlds**
 
 $$
-\omega_{x,t,1}, \omega_{x,t,2}, \dots \sim \mathbb P_t,
+\omega_{\pi,t,1}, \omega_{\pi,t,2}, \dots \sim \mathbb P_t,
 $$
 
-with the invariant that this sequence depends only on $(x,t)$, not on exploration order.
+with the invariant that this sequence depends only on $(\pi,t)$, not on exploration order.
 
 Observed trials are
 
 $$
-Z_{x,t,k} := Z(x,\omega_{x,t,k},t), \quad k=1,\dots,n(x,t).
+Z_{\pi,t,k} := Z(\pi,\omega_{\pi,t,k},t), \quad k=1,\dots,n(\pi,t).
 $$
 
-Here $k$ indexes the trial number within a fixed $(x,t)$ (i.e. repeated Monte Carlo evaluations at the same design and context).
+Here $k$ indexes the trial number within a fixed $(\pi,t)$ (i.e. repeated Monte Carlo evaluations at the same design and context).
 
 The orchestrator defines vector-valued risk aggregation
 
 $$
-\mathbf{s}(x,t) := \widehat{\boldsymbol{\rho}}\!\left(Z_{x,t,1:n(x,t)}\right) \in \mathbb R^k,
+\mathbf{s}(\pi,t) := \widehat{\boldsymbol{\rho}}\left(Z_{\pi,t,1:n(\pi,t)}\right) \in \mathbb R^k,
 \qquad
 \widehat{\boldsymbol{\rho}} := (\widehat{\rho}_1,\dots,\widehat{\rho}_k),
 $$
@@ -107,14 +103,12 @@ where each component may represent expectation, probability, quantile, CVaR, or 
 The orchestrator:
 
 * schedules contexts $t$,
-* allocates trials $n(x,t)$,
+* allocates trials $n(\pi,t)$,
 * adapts sampling,
 * decides stopping,
 * meta-optimises,
 * invokes certificates
-  $$
-  C\left(Z_{x,t,1:n(x,t)}\right) \in \mathcal C,
-  $$
+  $C\left(Z_{\pi,t,1:n(\pi,t)}\right) \in \mathcal C$
   such as confidence bounds or feasibility guarantees.
 
 Only aggregated feedback $\mathbf{s}$ is used to update the optimiser.
@@ -125,14 +119,14 @@ Only aggregated feedback $\mathbf{s}$ is used to update the optimiser.
 A certificate is a function of aggregated trial data (typically at a fixed evaluation time/context $t$),
 
 $$
-C\left(Z_{x,t,1:n(x,t)}\right) \in \mathcal C,
+C\left(Z_{\pi,t,1:n(\pi,t)}\right) \in \mathcal C,
 $$
 
 that provides a decision or guarantee.
-For example, for confidence level $\delta \in (0,1)$, an upper confidence bound $\mathrm{UCB}_\delta(x,t)$ satisfies
+For example, for confidence level $\delta \in (0,1)$, an upper confidence bound $\mathrm{UCB}_\delta(\pi,t)$ satisfies
 
 $$
-\mathbb P_t\left( \rho(x,t) \le \mathrm{UCB}_\delta(x,t) \right) \ge 1 - \delta.
+\mathbb P_t\left( \rho(\pi,t) \le \mathrm{UCB}_\delta(\pi,t) \right) \ge 1 - \delta.
 $$
 
 Certificates consume trial aggregates and produce guarantees (feasibility, bounds, stopping decisions); they never define the random variable $Z$ itself.
@@ -142,7 +136,7 @@ Certificates consume trial aggregates and produce guarantees (feasibility, bound
 
 ### Architectural invariant (fully general)
 
-Experiments define per-trial semantics (random variables) $Z(x,\omega,t)$ (and optionally validity $v(x,\omega,t)$).
+Experiments define per-trial semantics (random variables) $Z(\pi,\omega,t)$ and optionally a validity indicator $v(\pi,\omega,t)$.
 Orchestrators decide how contexts $t$ are scheduled and how collections of trials are sampled, aggregated, certified, and turned into decisions.
 Optimisers propose designs or policies using only aggregated feedback summaries (scalar or vector).
 

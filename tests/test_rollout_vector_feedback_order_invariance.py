@@ -33,7 +33,7 @@ class NoisyPolicy:
 @dataclass(frozen=True)
 class Trajectory:
     """
-    A trajectory-valued per-trial object Z(x, ω, t).
+    A trajectory-valued per-trial object Z(π, ω, t).
 
     This is intentionally domain-neutral, but examples include:
     - `states[i]`: a sequence of network/link states, queue states, or system states.
@@ -48,7 +48,7 @@ class Trajectory:
     outcomes: tuple[float, ...]
 
 
-def rollout(x: Policy, *, rng: random.Random, t: int, horizon: int = 25) -> Trajectory:
+def rollout(pi: Policy, *, rng: random.Random, t: int, horizon: int = 25) -> Trajectory:
     states: list[float] = [0.0]
     exogenous: list[float] = []
     actions: list[float] = []
@@ -59,7 +59,7 @@ def rollout(x: Policy, *, rng: random.Random, t: int, horizon: int = 25) -> Traj
 
     for i in range(horizon):
         exo = (rng.random() - 0.5) + 0.1 * float(t)
-        action = x.act(observation, rng=rng, t=t, i=i)
+        action = pi.act(observation, rng=rng, t=t, i=i)
 
         capacity = 0.5 + 0.05 * float(t) + 0.1 * (rng.random() - 0.5)
         demand = 0.6 + 0.1 * (rng.random() - 0.5)
@@ -113,23 +113,23 @@ def aggregate(trials: list[tuple[float, int, float]]) -> tuple[float, float, flo
 def evaluate(
     *,
     candidate_index: int,
-    x: Policy,
+    pi: Policy,
     t: int,
     n_trials: int,
     master_seed: int,
 ) -> tuple[float, float, float]:
     """
-    Evaluate s(x,t) from n(x,t)=n_trials trajectory trials.
+    Evaluate s(π,t) from n(π,t)=n_trials trajectory trials.
 
-    Determinism contract: the k-th trial for a fixed (candidate_index, t) always uses the
-    same RNG seed, regardless of exploration order.
+    Determinism contract: the k-th trial for a fixed (π,t) always uses the same RNG seed,
+    regardless of exploration order.
     """
 
     trials: list[tuple[float, int, float]] = []
     for k in range(n_trials):
         seed = master_seed + candidate_index * 1_000_000 + int(t) * 10_000 + k
         rng = random.Random(seed)
-        z = rollout(x, rng=rng, t=t)
+        z = rollout(pi, rng=rng, t=t)
         trials.append(trial_summary(z))
     return aggregate(trials)
 
@@ -137,8 +137,8 @@ def evaluate(
 def test_rollout_vector_feedback_is_invariant_to_exploration_order():
     """
     Framework correctness test:
-    for fixed candidates, fixed contexts, fixed n(x,t), and design/context-local RNG,
-    aggregated feedback s(x,t) must not depend on the optimiser ask order.
+    for fixed policies π, fixed contexts t, fixed n(π,t), and design/context-local RNG,
+    aggregated feedback s(π,t) must not depend on the optimiser ask order.
     """
 
     candidates: list[Policy] = [
@@ -155,11 +155,11 @@ def test_rollout_vector_feedback_is_invariant_to_exploration_order():
     def run(order: list[int]) -> dict[tuple[int, int], tuple[float, float, float]]:
         summaries: dict[tuple[int, int], tuple[float, float, float]] = {}
         for candidate_index in order:
-            x = candidates[candidate_index]
+            pi = candidates[candidate_index]
             for t in contexts:
                 summaries[(candidate_index, t)] = evaluate(
                     candidate_index=candidate_index,
-                    x=x,
+                    pi=pi,
                     t=t,
                     n_trials=n_trials,
                     master_seed=master_seed,
@@ -180,15 +180,14 @@ def test_rollout_vector_feedback_is_invariant_to_exploration_order():
 def test_context_changes_can_legitimately_change_feedback():
     """
     Sanity check for concept drift:
-    changing the scheduled context t is allowed to change s(x,t).
+    changing the scheduled context t is allowed to change s(π,t).
     """
 
-    x: Policy = NoisyPolicy(gain=0.2, noise_scale=0.1)
+    pi: Policy = NoisyPolicy(gain=0.2, noise_scale=0.1)
     master_seed = 123_456
     n_trials = 50
 
-    s_t0 = evaluate(candidate_index=0, x=x, t=0, n_trials=n_trials, master_seed=master_seed)
-    s_t2 = evaluate(candidate_index=0, x=x, t=2, n_trials=n_trials, master_seed=master_seed)
+    s_t0 = evaluate(candidate_index=0, pi=pi, t=0, n_trials=n_trials, master_seed=master_seed)
+    s_t2 = evaluate(candidate_index=0, pi=pi, t=2, n_trials=n_trials, master_seed=master_seed)
 
     assert s_t0 != s_t2
-
